@@ -18,6 +18,27 @@ public sealed record RateLimitSnapshot(
     DateTimeOffset ReceivedAt,
     bool IsSparse = false);
 
+public static class OfficialCodexQuotaWindows
+{
+    public const int FiveHourMinimumMinutes = 240;
+    public const int FiveHourMaximumMinutes = 360;
+    public const int WeeklyMinimumMinutes = 10000;
+
+    public static QuotaWindow? FiveHours(IEnumerable<QuotaWindow> windows) => windows
+        .Where(IsOfficialCodex)
+        .Where(window => window.WindowDurationMins is >= FiveHourMinimumMinutes and <= FiveHourMaximumMinutes)
+        .OrderBy(window => window.WindowDurationMins)
+        .FirstOrDefault();
+
+    public static QuotaWindow? Weekly(IEnumerable<QuotaWindow> windows) => windows
+        .Where(IsOfficialCodex)
+        .Where(window => window.WindowDurationMins is >= WeeklyMinimumMinutes)
+        .OrderBy(window => window.WindowDurationMins)
+        .FirstOrDefault();
+
+    private static bool IsOfficialCodex(QuotaWindow window) => window.Id.StartsWith("codex:", StringComparison.Ordinal);
+}
+
 public static class RateLimitParser
 {
     public static RateLimitSnapshot Parse(JsonElement result, DateTimeOffset receivedAt)
@@ -33,8 +54,16 @@ public static class RateLimitParser
         {
             foreach (var bucket in byLimit.EnumerateObject())
             {
-                // The historical codex bucket duplicates rateLimits; its windows add no new signal.
-                if (bucket.Name.Equals("codex", StringComparison.OrdinalIgnoreCase)) continue;
+                // The canonical codex bucket normally duplicates rateLimits, but is the authoritative
+                // fallback when the legacy envelope is absent. Keep envelope fields when both exist.
+                if (bucket.Name.Equals("codex", StringComparison.OrdinalIgnoreCase))
+                {
+                    var fallback = new List<QuotaWindow>();
+                    CollectNamedWindows(bucket.Value, fallback, "codex", "Codex", false);
+                    foreach (var window in fallback)
+                        if (!windows.Any(existing => string.Equals(existing.Id, window.Id, StringComparison.Ordinal))) windows.Add(window);
+                    continue;
+                }
                 var bucketName = FindString(bucket.Value, "limitName", "name") ?? Humanize(bucket.Name);
                 CollectNamedWindows(bucket.Value, windows, bucket.Name, bucketName, false);
             }

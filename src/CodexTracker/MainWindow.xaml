@@ -40,22 +40,26 @@
         </Grid.Style>
         <!-- The compact gauge is vector-laid out at its final size; no region crop or Viewbox raster scaling. -->
         <StackPanel Visibility="{Binding Expanded, Converter={StaticResource CompactVisibility}}" HorizontalAlignment="Center" VerticalAlignment="Top">
-          <Grid x:Name="CompactGaugeHost" Width="{Binding ActualWidth, ElementName=Root}"
-                Height="{Binding ActualWidth, ElementName=Root, Converter={StaticResource CompactGaugeDiameter}, ConverterParameter=WindowHeight}">
-            <Grid Width="{Binding ActualHeight, ElementName=CompactGaugeHost, Converter={StaticResource CompactGaugeDiameter}, ConverterParameter=Gauge}"
-                  Height="{Binding ActualHeight, ElementName=CompactGaugeHost, Converter={StaticResource CompactGaugeDiameter}, ConverterParameter=Gauge}"
-                  HorizontalAlignment="Center" VerticalAlignment="Center">
-              <Ellipse x:Name="CompactGaugeSurface" Width="{Binding ActualHeight, ElementName=CompactGaugeHost, Converter={StaticResource CompactGaugeDiameter}, ConverterParameter=Background}"
-                       Height="{Binding ActualHeight, ElementName=CompactGaugeHost, Converter={StaticResource CompactGaugeDiameter}, ConverterParameter=Background}"
-                       Fill="{DynamicResource GlassSurface}">
-                <Ellipse.Effect><DropShadowEffect BlurRadius="5" ShadowDepth="1" Opacity=".30" Color="#151A18" /></Ellipse.Effect>
-              </Ellipse>
-              <local:CircularQuotaGauge x:Name="CompactQuotaGauge" AutomationProperties.Name="{DynamicResource Loc.WeeklyQuotaIndicator}" Value="{Binding RemainingPercent}"
-                                       TrackBrush="{DynamicResource GaugeTrack}" ProgressBrush="{DynamicResource Accent}" StrokeThickness="3"
-                                       IsWorking="{Binding IsWorkAnimationEnabled}" />
-              <TextBlock Text="{Binding Weekly}" FontFamily="./assets/fonts/#Source Sans 3" FontSize="{Binding ActualWidth, ElementName=Root, Converter={StaticResource CompactGaugeDiameter}, ConverterParameter=FontSize}" FontWeight="Bold"
-                         Foreground="{DynamicResource Ink}" HorizontalAlignment="Center" VerticalAlignment="Center" />
-            </Grid>
+          <Grid x:Name="CompactGaugeHost" Width="{Binding ActualWidth, ElementName=Root}">
+            <Grid.Height><MultiBinding Converter="{StaticResource CompactQuotaGaugeSize}" ConverterParameter="HostHeight"><Binding ElementName="Root" Path="ActualWidth" /><Binding Path="CompactQuotaCount" /></MultiBinding></Grid.Height>
+            <StackPanel x:Name="CompactQuotaGauges" Orientation="Horizontal" HorizontalAlignment="Center" VerticalAlignment="Center">
+              <Grid x:Name="CompactFiveHourGauge" Margin="3,0" Visibility="{Binding ShowCompactFiveHour, Converter={StaticResource BooleanToVisibility}}">
+                <Grid.Width><MultiBinding Converter="{StaticResource CompactQuotaGaugeSize}"><Binding ElementName="Root" Path="ActualWidth" /><Binding Path="CompactQuotaCount" /></MultiBinding></Grid.Width>
+                <Grid.Height><MultiBinding Converter="{StaticResource CompactQuotaGaugeSize}"><Binding ElementName="Root" Path="ActualWidth" /><Binding Path="CompactQuotaCount" /></MultiBinding></Grid.Height>
+                <Ellipse Fill="{DynamicResource GlassSurface}"><Ellipse.Effect><DropShadowEffect BlurRadius="5" ShadowDepth="1" Opacity=".30" Color="#151A18" /></Ellipse.Effect></Ellipse>
+                <local:CircularQuotaGauge AutomationProperties.Name="5-hour quota remaining indicator" Value="{Binding FiveHourRemainingPercent}" TrackBrush="{DynamicResource GaugeTrack}" ProgressBrush="{DynamicResource Accent}" StrokeThickness="3" IsWorking="{Binding IsWorkAnimationEnabled}" />
+                <TextBlock Text="5h" FontFamily="./assets/fonts/#Source Sans 3" FontWeight="SemiBold" Foreground="{DynamicResource SoftInk}" HorizontalAlignment="Center" VerticalAlignment="Top" Margin="0,5,0,0" IsHitTestVisible="False"><TextBlock.FontSize><MultiBinding Converter="{StaticResource CompactQuotaGaugeSize}" ConverterParameter="Label"><Binding ElementName="Root" Path="ActualWidth" /><Binding Path="CompactQuotaCount" /></MultiBinding></TextBlock.FontSize></TextBlock>
+                <TextBlock Text="{Binding FiveHour}" FontFamily="./assets/fonts/#Source Sans 3" FontWeight="Bold" Foreground="{DynamicResource Ink}" HorizontalAlignment="Center" VerticalAlignment="Center" IsHitTestVisible="False"><TextBlock.FontSize><MultiBinding Converter="{StaticResource CompactQuotaGaugeSize}" ConverterParameter="Percent"><Binding ElementName="Root" Path="ActualWidth" /><Binding Path="CompactQuotaCount" /></MultiBinding></TextBlock.FontSize></TextBlock>
+              </Grid>
+              <Grid x:Name="CompactWeeklyGauge" Margin="3,0" Visibility="{Binding ShowCompactWeekly, Converter={StaticResource BooleanToVisibility}}">
+                <Grid.Width><MultiBinding Converter="{StaticResource CompactQuotaGaugeSize}"><Binding ElementName="Root" Path="ActualWidth" /><Binding Path="CompactQuotaCount" /></MultiBinding></Grid.Width>
+                <Grid.Height><MultiBinding Converter="{StaticResource CompactQuotaGaugeSize}"><Binding ElementName="Root" Path="ActualWidth" /><Binding Path="CompactQuotaCount" /></MultiBinding></Grid.Height>
+                <Ellipse Fill="{DynamicResource GlassSurface}"><Ellipse.Effect><DropShadowEffect BlurRadius="5" ShadowDepth="1" Opacity=".30" Color="#151A18" /></Ellipse.Effect></Ellipse>
+                <local:CircularQuotaGauge x:Name="CompactQuotaGauge" AutomationProperties.Name="{DynamicResource Loc.WeeklyQuotaIndicator}" Value="{Binding RemainingPercent}" TrackBrush="{DynamicResource GaugeTrack}" ProgressBrush="{DynamicResource Accent}" StrokeThickness="3" IsWorking="{Binding IsWorkAnimationEnabled}" />
+                <TextBlock Text="7d" FontFamily="./assets/fonts/#Source Sans 3" FontWeight="SemiBold" Foreground="{DynamicResource SoftInk}" HorizontalAlignment="Center" VerticalAlignment="Top" Margin="0,5,0,0" IsHitTestVisible="False"><TextBlock.FontSize><MultiBinding Converter="{StaticResource CompactQuotaGaugeSize}" ConverterParameter="Label"><Binding ElementName="Root" Path="ActualWidth" /><Binding Path="CompactQuotaCount" /></MultiBinding></TextBlock.FontSize></TextBlock>
+                <TextBlock Text="{Binding Weekly}" FontFamily="./assets/fonts/#Source Sans 3" FontWeight="Bold" Foreground="{DynamicResource Ink}" HorizontalAlignment="Center" VerticalAlignment="Center" IsHitTestVisible="False"><TextBlock.FontSize><MultiBinding Converter="{StaticResource CompactQuotaGaugeSize}" ConverterParameter="Percent"><Binding ElementName="Root" Path="ActualWidth" /><Binding Path="CompactQuotaCount" /></MultiBinding></TextBlock.FontSize></TextBlock>
+              </Grid>
+            </StackPanel>
           </Grid>
           <Button x:Name="AgentIndicatorButton" Width="20" Height="20" Padding="0" Margin="0,-1,0,5"
                   Visibility="{Binding HasAgentIndicator, Converter={StaticResource BooleanToVisibility}}"
@@ -229,6 +233,20 @@
         <ScrollViewer x:Name="DetailedScrollViewer" Visibility="{Binding Expanded, Converter={StaticResource BooleanToVisibility}}"
                       VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Margin="12">
           <StackPanel x:Name="DetailedContent" LayoutUpdated="DetailedContentLayoutUpdated">
+            <Grid x:Name="DetailedFiveHourQuota" Margin="0,3,0,13" Visibility="{Binding HasFiveHourQuota, Converter={StaticResource BooleanToVisibility}}">
+              <Grid.ColumnDefinitions><ColumnDefinition Width="76" /><ColumnDefinition /></Grid.ColumnDefinitions>
+              <Grid Width="72" Height="72" HorizontalAlignment="Left">
+                <local:CircularQuotaGauge AutomationProperties.Name="5-hour quota remaining indicator" Value="{Binding FiveHourRemainingPercent}"
+                                         TrackBrush="{DynamicResource GaugeTrack}" ProgressBrush="{DynamicResource Accent}" StrokeThickness="4"
+                                         IsWorking="{Binding IsWorkAnimationEnabled}" />
+                <TextBlock Text="{Binding FiveHour}" FontFamily="./assets/fonts/#Source Sans 3" FontSize="19.55" FontWeight="Bold"
+                           Foreground="{DynamicResource Ink}" HorizontalAlignment="Center" VerticalAlignment="Center" />
+              </Grid>
+              <StackPanel Grid.Column="1" VerticalAlignment="Center" Margin="11,0,0,0">
+                <TextBlock Text="5h" FontSize="10" FontWeight="SemiBold" Foreground="{DynamicResource SoftInk}" />
+                <TextBlock Text="{Binding FiveHourReset}" FontFamily="./assets/fonts/#Source Sans 3" FontSize="10" TextWrapping="Wrap" Foreground="{DynamicResource SoftInk}" Margin="0,3,0,0" />
+              </StackPanel>
+            </Grid>
             <Grid Margin="0,3,0,13">
               <Grid.ColumnDefinitions><ColumnDefinition Width="76" /><ColumnDefinition /></Grid.ColumnDefinitions>
               <Grid Width="72" Height="72" HorizontalAlignment="Left">
@@ -313,9 +331,10 @@
             </ItemsControl>
             <StackPanel Margin="0,13,0,0">
               <TextBlock Text="{DynamicResource Loc.DailyUsageCurrentMonth}" FontSize="9" Foreground="{DynamicResource SoftInk}" Margin="0,0,0,5" />
-              <local:DailyUsageChart x:Name="DailyChart" Series="{Binding DailyTokenSeries}" Height="76"
+              <local:DailyUsageChart x:Name="DailyChart" Series="{Binding DailyTokenSeries}" QuotaSeries="{Binding DailyQuotaSeries}" Height="96"
                                      CurrencyCode="{Binding CurrencyCode}"
                                      BarBrush="{DynamicResource Accent}" TrackBrush="{DynamicResource GaugeTrack}"
+                                     QuotaBrush="{DynamicResource Ink}"
                                      LabelBrush="{DynamicResource SoftInk}" TooltipSurface="{DynamicResource InputSurface}"
                                      TooltipTextBrush="{DynamicResource Ink}" />
               <Button Click="OpenChatDetails" Content="{DynamicResource Loc.DetailsByChat}" HorizontalAlignment="Left" Padding="8,4" Margin="0,7,0,0"
@@ -361,6 +380,8 @@
                     </Grid>
                   </Button>
                   <TextBlock Text="{DynamicResource Loc.Currency}" Style="{StaticResource SettingsLabelStyle}" Margin="0,18,0,4" /><ComboBox x:Name="CurrencyBox" SelectionChanged="CurrencyChanged"><ComboBoxItem Tag="BRL">BRL (R$)</ComboBoxItem><ComboBoxItem Tag="USD">USD (US$)</ComboBoxItem></ComboBox>
+                  <TextBlock Text="{DynamicResource Loc.CompactQuota}" Style="{StaticResource SettingsLabelStyle}" Margin="0,18,0,4" />
+                  <ComboBox x:Name="CompactQuotaBox"><ComboBoxItem Tag="5h">5h</ComboBoxItem><ComboBoxItem Tag="7d">7d</ComboBoxItem><ComboBoxItem Tag="both">5h + 7d</ComboBoxItem></ComboBox>
                   <StackPanel x:Name="RatePanel"><TextBlock Text="{DynamicResource Loc.UsdBrlRate}" Style="{StaticResource SettingsLabelStyle}" Margin="0,16,0,4" /><TextBox x:Name="RateBox" FontFamily="./assets/fonts/#Source Sans 3" /></StackPanel>
                   <StackPanel x:Name="CodexPathFallbackPanel" Visibility="Collapsed"><TextBlock Text="{DynamicResource Loc.CodexPath}" Style="{StaticResource SettingsLabelStyle}" Margin="0,16,0,4" /><TextBox x:Name="PathBox" /><Button Click="Browse" Content="{DynamicResource Loc.Browse}" Padding="10,7" Margin="0,12,0,0" HorizontalAlignment="Left" /></StackPanel>
                   <Button Click="OpenLog" Content="{DynamicResource Loc.OpenLog}" Padding="10,7" Margin="0,12,0,7" HorizontalAlignment="Left" />

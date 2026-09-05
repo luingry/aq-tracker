@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.20.0] - 2026-09-05
+
+### Added
+
+- Added official Codex 5h and 7d quota indicators, compact display selection, and a detected-only 5h detail row while retaining the daily quota chart introduced in 0.19.0.
+
+### Fixed
+
+- Selected quota windows by the official `codex` bucket and window duration instead of assuming the weekly quota was always `primary`; accounts with reversed 5h/weekly slots now show and retain the correct weekly history.
+
+## [0.19.0] - 2026-09-05
+
+### Added
+
+- Overlayed the current-month daily token bars with the weekly quota used at each day close, including a live current-day point, bounded smooth curve, percent axis, and quota-aware hover details.
+- Retained official live quota readings locally and extracted historical weekly Codex readings from cached rollout JSONL so daily quota history survives restarts without modifying settings or source rollouts.
+
 ## [0.18.13] - 2026-08-21
 
 ### Fixed

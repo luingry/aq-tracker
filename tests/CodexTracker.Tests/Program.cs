@@ -101,6 +101,36 @@ _ = reconnectSnapshotCoordinator.OnSnapshot(coordinatorSnapshot, true, previousS
 var nextSnapshotGeneration = reconnectSnapshotCoordinator.BeginConnection();
 Assert(reconnectSnapshotCoordinator.OnAnalyticsReady(coordinatorUsage, true) is null, "analytics after reconnect never applies against the old snapshot");
 Assert(reconnectSnapshotCoordinator.OnSnapshot(coordinatorSnapshot, true, nextSnapshotGeneration) == coordinatorUsage, "analytics after reconnect waits for and applies against the new snapshot");
+var quotaSeriesNow = new DateTimeOffset(2026, 8, 12, 15, 0, 0, TimeSpan.FromHours(-3));
+var dailyQuota = DailyQuotaSeries.CloseByLocalDay([
+    new(new DateTimeOffset(2026, 8, 10, 9, 0, 0, TimeSpan.Zero), 20),
+    new(new DateTimeOffset(2026, 8, 10, 21, 0, 0, TimeSpan.Zero), 12),
+    new(new DateTimeOffset(2026, 8, 12, 12, 0, 0, TimeSpan.Zero), 40)
+], new DateTime(2026, 8, 1), quotaSeriesNow, 55);
+Assert(dailyQuota.Single(x => x.Day.Day == 10).UsedPercent == 12 && dailyQuota.Single(x => x.Day.Day == 11).UsedPercent is null && dailyQuota.Single(x => x.Day.Day == 12).UsedPercent == 55 && dailyQuota.Single(x => x.Day.Day == 13).UsedPercent is null, "daily quota closes each local day chronologically, preserves missing days, uses live today, and never forecasts future days");
+var quotaStorePath = Path.Combine(Path.GetTempPath(), "codex-tracker-quota-store-" + Guid.NewGuid() + ".json");
+var quotaStore = new QuotaSnapshotStore(quotaStorePath);
+_ = quotaStore.Append(quotaSeriesNow, 44);
+Assert(new QuotaSnapshotStore(quotaStorePath).Read().Single() == new TimedQuotaUsage(quotaSeriesNow, 44), "official live quota readings persist independently of raw rollouts");
+File.Delete(quotaStorePath);
+var quotaRolloutRoot = Path.Combine(Path.GetTempPath(), "codex-tracker-quota-rollout-" + Guid.NewGuid());
+Directory.CreateDirectory(quotaRolloutRoot);
+var quotaRolloutPath = Path.Combine(quotaRolloutRoot, "quota.jsonl");
+File.WriteAllText(quotaRolloutPath, "{\"timestamp\":\"2026-08-10T09:00:00Z\",\"type\":\"event_msg\",\"payload\":{\"type\":\"token_count\",\"info\":null,\"rate_limits\":{\"limit_id\":\"codex\",\"primary\":{\"used_percent\":20,\"window_minutes\":10080}}}}\n{\"timestamp\":\"2026-08-10T21:00:00Z\",\"type\":\"event_msg\",\"payload\":{\"type\":\"token_count\",\"info\":null,\"rate_limits\":{\"limit_id\":\"codex\",\"primary\":{\"used_percent\":77,\"window_minutes\":300},\"secondary\":{\"used_percent\":12,\"window_minutes\":10080}}}}\n");
+var quotaRolloutService = new LocalUsageAnalyticsService(() => quotaSeriesNow);
+var quotaRollout = quotaRolloutService.Read(5.5m, quotaRolloutRoot);
+Assert(quotaRollout.QuotaTimeline is { Count: 1 } && quotaRollout.QuotaTimeline[0] == new TimedQuotaUsage(new DateTimeOffset(2026, 8, 10, 21, 0, 0, TimeSpan.Zero), 12), "analytics reads the latest weekly Codex quota from secondary when primary is the five-hour window, even when token_count info is null");
+File.AppendAllText(quotaRolloutPath, "{\"timestamp\":\"2026-08-11T21:00:00Z\",\"type\":\"event_msg\",\"payload\":{\"type\":\"token_count\",\"info\":null,\"rate_limits\":{\"limit_id\":\"codex\",\"primary\":{\"used_percent\":30,\"window_minutes\":10080}}}}\n");
+Assert(quotaRolloutService.Read(5.5m, quotaRolloutRoot).QuotaTimeline is { Count: 2 } && quotaRolloutService.FilesAppendedLastRead == 1, "quota extraction remains incremental on appended rollouts");
+Directory.Delete(quotaRolloutRoot, true);
+var vmQuotaPath = Path.Combine(Path.GetTempPath(), "codex-tracker-vm-quota-" + Guid.NewGuid() + ".json");
+var vmQuotaNow = new DateTimeOffset(2026, 8, 12, 16, 0, 0, TimeSpan.FromHours(-3));
+var vmQuota = new MainViewModel(new QuotaSnapshotStore(vmQuotaPath), () => vmQuotaNow);
+var live70 = new RateLimitSnapshot([new("codex:primary", "Weekly", 70, null, 10080)], null, null, null, vmQuotaNow.AddHours(-1));
+var delayed30 = new RateLimitSnapshot([new("codex:primary", "Weekly", 30, null, 10080)], null, null, null, vmQuotaNow.AddHours(-2));
+vmQuota.ApplyQuota(live70); vmQuota.Apply(delayed30, new UsageAnalytics(0, 0, 0, 0, 0, [], QuotaTimeline: [new TimedQuotaUsage(vmQuotaNow.AddDays(-1), 20)]));
+Assert(vmQuota.DailyQuotaSeries.Single(x => x.Day.Day == 12).UsedPercent == 70 && vmQuota.DailyQuotaSeries.Single(x => x.Day.Day == 11).UsedPercent == 20, "daily quota retains historical load and never regresses today when delayed analytics apply");
+File.Delete(vmQuotaPath);
 Assert(mainWindowSource.Contains("_startupAnalytics.BeginConnection();", StringComparison.Ordinal) && mainWindowSource.Contains("_startupAnalytics.IsCurrent(connectionGeneration)", StringComparison.Ordinal), "new app-server clients invalidate previous callbacks before asynchronous discovery and recheck generation on the dispatcher");
 
 var trayOnlyExtendedStyle = TrayOnlyWindowPolicy.ToTrayOnlyExtendedStyle(TrayOnlyWindowPolicy.AppWindowExtendedStyle | 0x00000008L);
@@ -110,6 +140,15 @@ var compactGauge = CompactGaugeLayoutPolicy.ForWindow(new WidgetSize(62, 52));
 Assert(compactGauge == new CompactGaugeLayout(42, 38), "minimum compact layout keeps the circular background exactly 4 DIP smaller than the 42 DIP gauge");
 Assert(CompactGaugeLayoutPolicy.ForWindow(new WidgetSize(100, 100 / (62d / 52d))) == new CompactGaugeLayout(100 / (62d / 52d) - 10, 100 / (62d / 52d) - 14), "resized compact layout derives both vector circles from the final window height without Viewbox scaling");
 Assert(NearlyEqual(CompactGaugeLayoutPolicy.FontSizeForWindow(new(62, 52)), 15.18) && NearlyEqual(CompactGaugeLayoutPolicy.FontSizeForWindow(new(81, 0)), 15.18 * 81d / 62d) && NearlyEqual(CompactGaugeLayoutPolicy.FontSizeForWindow(new(100, 0)), 15.18 * 100d / 62d), "compact font uses the 15% larger 15.18 DIP base size and scales proportionally with the widget width");
+var compactQuotaGaugeSize = new CompactQuotaGaugeSizeConverter();
+Assert(NearlyEqual((double)compactQuotaGaugeSize.Convert([96d, 2], typeof(double), "", System.Globalization.CultureInfo.InvariantCulture), 42) && NearlyEqual((double)compactQuotaGaugeSize.Convert([62d, 1], typeof(double), "", System.Globalization.CultureInfo.InvariantCulture), 42) && NearlyEqual((double)compactQuotaGaugeSize.Convert([160d, 2], typeof(double), "", System.Globalization.CultureInfo.InvariantCulture), 74), "dual compact layout gives each visible gauge the original responsive per-circle diameter rather than squeezing both into the single-gauge width");
+var dualCompactResize = ManualResizeGeometry.ResizeCompact(new ResizeBounds(10, 10, 96, 52), new ResizeVector(100, 0), ResizeHandle.Right, new ResizeWorkArea(0, 0, 400, 400), 96, 160, 2d, 4d);
+var dualCompactTopResize = ManualResizeGeometry.ResizeCompact(new ResizeBounds(10, 100, 96, 52), new ResizeVector(0, -100), ResizeHandle.Top, new ResizeWorkArea(0, 0, 400, 400), 96, 160, 2d, 4d);
+Assert(dualCompactResize.Width == 160 && dualCompactResize.Height == 84 && dualCompactTopResize.Width == 160 && dualCompactTopResize.Bottom == 152, "dual compact resizing uses its affine width-to-height geometry and preserves the opposite bottom edge when the top edge grows");
+var compactQuotaXaml = File.ReadAllText(Path.Combine(Directory.GetCurrentDirectory(), "src", "CodexTracker", "MainWindow.xaml"));
+var compactQuotaWindowSource = File.ReadAllText(Path.Combine(Directory.GetCurrentDirectory(), "src", "CodexTracker", "MainWindow.xaml.cs"));
+Assert(compactQuotaXaml.Contains("x:Name=\"CompactQuotaGauges\" Orientation=\"Horizontal\" HorizontalAlignment=\"Center\"", StringComparison.Ordinal) && compactQuotaXaml.Contains("Text=\"5h\"", StringComparison.Ordinal) && compactQuotaXaml.Contains("Text=\"7d\"", StringComparison.Ordinal) && compactQuotaXaml.Contains("ConverterParameter=\"Percent\"", StringComparison.Ordinal) && compactQuotaXaml.Contains("x:Name=\"DetailedFiveHourQuota\"", StringComparison.Ordinal) && compactQuotaXaml.Contains("Text=\"{Binding FiveHourReset}\"", StringComparison.Ordinal) && compactQuotaXaml.Contains("x:Name=\"CompactQuotaBox\"", StringComparison.Ordinal) && compactQuotaXaml.Contains("Tag=\"both\">5h + 7d", StringComparison.Ordinal), "compact and detailed quota layouts retain centered percentages, exact selector choices, responsive dual-circle sizing, and a detected-only five-hour detail row");
+Assert(compactQuotaWindowSource.Contains("new FrameworkElement[] { CompactFiveHourGauge, CompactWeeklyGauge }", StringComparison.Ordinal) && compactQuotaWindowSource.Contains("CompactWidthForStoredSize", StringComparison.Ordinal) && compactQuotaWindowSource.Contains("StoredCompactWidth", StringComparison.Ordinal), "compact resizing and persistence operate on both visible gauge hit regions while retaining the saved single-circle scale");
 Assert(BackdropCompositionPolicy.ForMode(WidgetVisualMode.Compact) == new BackdropComposition(BackdropNonClientRendering.Disabled, BackdropCornerPreference.DoNotRound) && BackdropCompositionPolicy.ForMode(WidgetVisualMode.Detailed) == new BackdropComposition(BackdropNonClientRendering.Enabled, BackdropCornerPreference.Round) && BackdropCompositionPolicy.ForMode(WidgetVisualMode.Settings) == new BackdropComposition(BackdropNonClientRendering.Enabled, BackdropCornerPreference.Round), "backdrop composition disables non-client shadow composition only in compact mode");
 
 var lightAccent = AccentPalette.Create("#FFB000", false);
@@ -230,6 +269,7 @@ finally
 Assert(!Directory.Exists(settingsTestDirectory), "temporary settings round-trip directory is removed after the test");
 Assert(SettingsStore.Normalize(new AppSettings(AccentColor: "not-a-color")).AccentColor == AccentPalette.DefaultBaseHex, "invalid persisted accent colors migrate to the safe default");
 Assert(SettingsStore.Normalize(new AppSettings(LanguageCode: "fr-FR")).LanguageCode == "pt-BR", "unsupported persisted languages migrate to pt-BR");
+Assert(SettingsStore.Normalize(new AppSettings(CompactQuotaDisplay: "5h")).CompactQuotaDisplay == "5h" && SettingsStore.Normalize(new AppSettings(CompactQuotaDisplay: "7d")).CompactQuotaDisplay == "7d" && SettingsStore.Normalize(new AppSettings(CompactQuotaDisplay: "both")).CompactQuotaDisplay == "both" && SettingsStore.Normalize(new AppSettings(CompactQuotaDisplay: "unknown")).CompactQuotaDisplay == "both", "compact quota selection persists only five-hour, seven-day, or both with both as the safe default");
 Assert(WidgetVisibilityPolicy.ShouldShow(true, false, false, true, false) && WidgetVisibilityPolicy.ShouldShow(false, true, false, true, false), "active and unread completed work force visibility even while Codex is backgrounded or minimized");
 Assert(WidgetVisibilityPolicy.ShouldShow(false, false, true, false, false) && WidgetVisibilityPolicy.ShouldShow(false, false, false, false, true), "Codex foreground and direct widget interaction keep the widget visible");
 Assert(!WidgetVisibilityPolicy.ShouldShow(false, false, false, false, false) && !WidgetVisibilityPolicy.ShouldShow(false, false, true, true, false), "idle widget hides immediately when Codex is backgrounded or minimized");
@@ -247,7 +287,7 @@ var indicatorStart = mainWindowXaml.IndexOf("x:Name=\"AgentIndicatorButton\"", S
 var indicatorEnd = mainWindowXaml.IndexOf("<Popup x:Name=\"AgentListPopup\"", indicatorStart, StringComparison.Ordinal);
 var indicatorTemplate = indicatorStart >= 0 && indicatorEnd > indicatorStart ? mainWindowXaml.Substring(indicatorStart, indicatorEnd - indicatorStart) : string.Empty;
 Assert(indicatorTemplate.Contains("<Trigger Property=\"IsMouseOver\" Value=\"True\">", StringComparison.Ordinal) && indicatorTemplate.Contains("TargetName=\"AgentCount\" Property=\"Visibility\" Value=\"Collapsed\"", StringComparison.Ordinal) && indicatorTemplate.Contains("TargetName=\"AgentArrow\" Property=\"Visibility\" Value=\"Visible\"", StringComparison.Ordinal) && !indicatorTemplate.Contains("<MultiDataTrigger>", StringComparison.Ordinal), "agent indicator hover has one direct IsMouseOver trigger that swaps the count for the chevron independently of open state");
-Assert(indicatorTemplate.Contains("x:Name=\"AgentIndicatorSurface\" Background=\"#2D2D2D\"", StringComparison.Ordinal) && indicatorTemplate.Contains("<Border.Effect><DropShadowEffect BlurRadius=\"5\" ShadowDepth=\"1\" Opacity=\".30\" Color=\"#151A18\" /></Border.Effect>", StringComparison.Ordinal) && mainWindowXaml.Contains("x:Name=\"CompactGaugeSurface\"", StringComparison.Ordinal) && mainWindowXaml.Contains("<Ellipse.Effect><DropShadowEffect BlurRadius=\"5\" ShadowDepth=\"1\" Opacity=\".30\" Color=\"#151A18\" /></Ellipse.Effect>", StringComparison.Ordinal) && mainWindowXaml.Contains("x:Name=\"AgentIndicatorButton\" Width=\"20\" Height=\"20\" Padding=\"0\" Margin=\"0,-1,0,5\"", StringComparison.Ordinal) && mainWindowXaml.Contains("x:Name=\"WindowSurface\" CornerRadius=\"12\" ClipToBounds=\"True\"", StringComparison.Ordinal) && mainWindowSource.Contains("private const double CompactAgentIndicatorHeight = 24d;", StringComparison.Ordinal), "compact gauge and dark agent indicator use coherent subtle shadows with explicit lower space while the rounded window keeps its intended clipping");
+Assert(indicatorTemplate.Contains("x:Name=\"AgentIndicatorSurface\" Background=\"#2D2D2D\"", StringComparison.Ordinal) && indicatorTemplate.Contains("<Border.Effect><DropShadowEffect BlurRadius=\"5\" ShadowDepth=\"1\" Opacity=\".30\" Color=\"#151A18\" /></Border.Effect>", StringComparison.Ordinal) && mainWindowXaml.Contains("x:Name=\"CompactQuotaGauges\"", StringComparison.Ordinal) && mainWindowXaml.Contains("x:Name=\"CompactWeeklyGauge\"", StringComparison.Ordinal) && mainWindowXaml.Contains("<Ellipse.Effect><DropShadowEffect BlurRadius=\"5\" ShadowDepth=\"1\" Opacity=\".30\" Color=\"#151A18\" /></Ellipse.Effect>", StringComparison.Ordinal) && mainWindowXaml.Contains("x:Name=\"AgentIndicatorButton\" Width=\"20\" Height=\"20\" Padding=\"0\" Margin=\"0,-1,0,5\"", StringComparison.Ordinal) && mainWindowXaml.Contains("x:Name=\"WindowSurface\" CornerRadius=\"12\" ClipToBounds=\"True\"", StringComparison.Ordinal) && mainWindowSource.Contains("private const double CompactAgentIndicatorHeight = 24d;", StringComparison.Ordinal), "compact quota gauges and dark agent indicator use coherent subtle shadows with explicit lower space while the rounded window keeps its intended clipping");
 Assert(indicatorTemplate.Contains("x:Name=\"AgentIndicatorSurface\" Background=\"#2D2D2D\" CornerRadius=\"10\" ClipToBounds=\"True\"", StringComparison.Ordinal) && indicatorTemplate.Contains("<Path x:Name=\"AgentWorkSpinner\" Width=\"18\" Height=\"18\" Data=\"M9,0 A9,9 0 0 1 14.29,1.72\" Stretch=\"None\" Stroke=\"#FFFFFF\" StrokeThickness=\"1\" Opacity=\".50\"", StringComparison.Ordinal) && indicatorTemplate.Contains("<RotateTransform x:Name=\"AgentWorkSpinnerRotation\" Angle=\"0\" />", StringComparison.Ordinal) && indicatorTemplate.Contains("<DataTrigger Binding=\"{Binding IsWorkAnimationEnabled}\" Value=\"True\">", StringComparison.Ordinal) && indicatorTemplate.Contains("x:Name=\"AgentWorkSpinnerStoryboard\"", StringComparison.Ordinal) && indicatorTemplate.Contains("Storyboard.TargetName=\"AgentWorkSpinnerRotation\" Storyboard.TargetProperty=\"Angle\" From=\"0\" To=\"-360\" Duration=\"0:0:1.00\"", StringComparison.Ordinal) && indicatorTemplate.Contains("<Storyboard RepeatBehavior=\"Forever\">", StringComparison.Ordinal) && !indicatorTemplate.Contains("AgentWorkGlow", StringComparison.Ordinal) && !indicatorTemplate.Contains("RadialGradientBrush", StringComparison.Ordinal) && !indicatorTemplate.Contains("GradientStop", StringComparison.Ordinal) && !indicatorTemplate.Contains("<BlurEffect", StringComparison.Ordinal) && !indicatorTemplate.Contains("ScaleTransform", StringComparison.Ordinal) && !indicatorTemplate.Contains("M10,1 A9,9", StringComparison.Ordinal) && indicatorTemplate.Contains("<StopStoryboard BeginStoryboardName=\"AgentWorkSpinnerStoryboard\" />", StringComparison.Ordinal), "active agents display a clipped 10-percent half-opacity white spinner arc on the indicator edge with fixed geometry and counterclockwise rotation only while work animation is allowed and stops cleanly for reduced motion");
 Assert(indicatorTemplate.Contains("Visibility=\"{Binding HasAgentIndicator", StringComparison.Ordinal) && indicatorTemplate.Contains("x:Name=\"AgentCompletedCheck\"", StringComparison.Ordinal) && indicatorTemplate.Contains("Binding=\"{Binding ShowsCompletedIndicator}\"", StringComparison.Ordinal) && indicatorTemplate.Contains("Property=\"Background\" Value=\"#DDF3E6\"", StringComparison.Ordinal), "completed unread work replaces the active count with a green check on a light-green indicator");
 var agentListStart = mainWindowXaml.IndexOf("<Popup x:Name=\"AgentListPopup\"", StringComparison.Ordinal);
@@ -454,6 +494,22 @@ var merged = RateLimitParser.Merge(snapshot, sparse);
 Assert(merged.PlanType == "pro" && merged.Credits == "Credits: 18.5" && merged.Windows.Count == 2, "sparse update preserves metadata and buckets");
 var weeklyOnly = RateLimitParser.Parse(JsonDocument.Parse("""{ "rateLimits": { "planType":"pro", "primary":{"usedPercent":9,"windowDurationMins":10080} } }""").RootElement, DateTimeOffset.UtcNow);
 Assert(!weeklyOnly.Windows.Any(x => x.WindowDurationMins is >= 240 and <= 360), "missing five-hour window is absent rather than zero");
+var codexOnlyByLimitId = RateLimitParser.Parse(JsonDocument.Parse("""{ "rateLimitsByLimitId": { "codex": { "primary":{"usedPercent":17,"windowDurationMins":300}, "secondary":{"usedPercent":41,"windowDurationMins":10080} } } }""").RootElement, DateTimeOffset.UtcNow);
+Assert(codexOnlyByLimitId.Windows.Count == 2 && OfficialCodexQuotaWindows.FiveHours(codexOnlyByLimitId.Windows)?.Id == "codex:primary" && OfficialCodexQuotaWindows.Weekly(codexOnlyByLimitId.Windows)?.Id == "codex:secondary", "canonical by-limit codex bucket is a fallback when the legacy envelope is absent and roles may be reversed");
+var rootAndDuplicateCodex = RateLimitParser.Parse(JsonDocument.Parse("""{ "rateLimits": { "primary":{"usedPercent":23,"windowDurationMins":300}, "secondary":{"usedPercent":55,"windowDurationMins":10080} }, "rateLimitsByLimitId": { "codex": { "primary":{"usedPercent":99,"windowDurationMins":300}, "secondary":{"usedPercent":99,"windowDurationMins":10080} } } }""").RootElement, DateTimeOffset.UtcNow);
+Assert(rootAndDuplicateCodex.Windows.Count == 2 && rootAndDuplicateCodex.Windows.All(window => window.UsedPercent != 99), "legacy envelope readings win over duplicate canonical codex fields");
+var genericAndFamilyLimits = RateLimitParser.Parse(JsonDocument.Parse("""{ "rateLimits": { "primary":{"usedPercent":51,"windowDurationMins":10080}, "secondary":null }, "rateLimitsByLimitId": { "codex": { "primary":{"usedPercent":51,"windowDurationMins":10080} }, "codex_bengalfox": { "limitName":"GPT-5.3 Codex Spark", "primary":{"usedPercent":13,"windowDurationMins":300}, "secondary":{"usedPercent":31,"windowDurationMins":10080} } } }""").RootElement, DateTimeOffset.UtcNow);
+Assert(OfficialCodexQuotaWindows.FiveHours(genericAndFamilyLimits.Windows) is null && OfficialCodexQuotaWindows.Weekly(genericAndFamilyLimits.Windows)?.UsedPercent == 51, "generic indicators exclude model-family five-hour and weekly buckets even when their roles contain both durations");
+var compactQuotaViewModel = new MainViewModel();
+compactQuotaViewModel.ApplyQuota(new RateLimitSnapshot(codexOnlyByLimitId.Windows, null, null, null, DateTimeOffset.UtcNow));
+Assert(compactQuotaViewModel.HasFiveHourQuota && compactQuotaViewModel.FiveHour == "83%" && compactQuotaViewModel.Weekly == "59%" && compactQuotaViewModel.ShowCompactFiveHour && compactQuotaViewModel.ShowCompactWeekly, "both compact gauges default to official five-hour and weekly durations independently of primary or secondary roles");
+compactQuotaViewModel.SetCompactQuotaDisplay("5h");
+Assert(compactQuotaViewModel.ShowCompactFiveHour && !compactQuotaViewModel.ShowCompactWeekly, "five-hour compact selection leaves only the detected five-hour gauge visible");
+compactQuotaViewModel.SetCompactQuotaDisplay("7d");
+Assert(!compactQuotaViewModel.ShowCompactFiveHour && compactQuotaViewModel.ShowCompactWeekly, "seven-day compact selection leaves only the weekly gauge visible");
+compactQuotaViewModel.ApplyQuota(new RateLimitSnapshot(weeklyOnly.Windows, null, null, null, DateTimeOffset.UtcNow));
+compactQuotaViewModel.SetCompactQuotaDisplay("5h");
+Assert(!compactQuotaViewModel.HasFiveHourQuota && !compactQuotaViewModel.ShowCompactFiveHour, "selecting five-hour without a detected official window never fabricates a gauge");
 var officialRemainingFixture = RateLimitParser.Parse(JsonDocument.Parse("""{ "rateLimits": { "primary":{"usedPercent":16,"resetsAt":1787090315,"windowDurationMins":10080} }, "rateLimitsByLimitId":{"codex":{"primary":{"usedPercent":16,"windowDurationMins":10080}}} }""").RootElement, DateTimeOffset.UtcNow);
 var officialWeekly = officialRemainingFixture.Windows.Single(x => x.Id == "codex:primary");
 Assert(QuotaPresentation.FormatWeeklyRemaining(officialWeekly) == "84%", "official used=16 displays 84% remaining to match Codex UI");
@@ -744,7 +800,7 @@ Assert(new LocalUsageAnalyticsService(() => analyticsNow, stateDatabasePath: whi
 SqliteConnection.ClearAllPools();
 Directory.Delete(chatUsageRoot, true);
 File.AppendAllText(Path.Combine(analyticsRoot, "session.jsonl"), "\n");
-var cachedAnalytics = new LocalUsageAnalyticsService();
+var cachedAnalytics = new LocalUsageAnalyticsService(() => analyticsNow);
 _ = cachedAnalytics.Read(5.5m, analyticsRoot);
 Assert(cachedAnalytics.FilesParsedLastRead == 1, "initial analytics read parses the source file");
 _ = cachedAnalytics.Read(5.5m, analyticsRoot);
@@ -759,7 +815,7 @@ var partialRoot = Path.Combine(Path.GetTempPath(), "codex-tracker-partial-" + Gu
 Directory.CreateDirectory(partialRoot);
 var partialPath = Path.Combine(partialRoot, "active.jsonl");
 File.WriteAllText(partialPath, "{\"timestamp\":\"2026-08-12T10:00:00Z\",\"payload\":{\"type\":\"turn_context\",\"model\":\"gpt-5.6-terra\"}}\n{\"timestamp\":\"2026-08-12T10:01:00Z\",\"payload\":");
-var partialAnalytics = new LocalUsageAnalyticsService();
+var partialAnalytics = new LocalUsageAnalyticsService(() => analyticsNow);
 Assert(partialAnalytics.Read(5.5m, partialRoot).MonthTokens == 0, "partial JSONL record does not contribute before newline commit");
 File.AppendAllText(partialPath, "{\"type\":\"token_count\",\"info\":{\"total_token_usage\":{\"input_tokens\":10,\"cached_input_tokens\":0,\"output_tokens\":0,\"total_tokens\":10}}}}\n");
 Assert(partialAnalytics.Read(5.5m, partialRoot).MonthTokens == 10, "completed partial record is rebuilt and counted exactly once");
@@ -769,7 +825,7 @@ Directory.CreateDirectory(rewriteRoot);
 var rewritePath = Path.Combine(rewriteRoot, "rewrite.jsonl");
 var rewriteA = "{\"timestamp\":\"2026-08-12T10:00:00Z\",\"payload\":{\"type\":\"token_count\",\"info\":{\"total_token_usage\":{\"input_tokens\":10,\"total_tokens\":10}}}}\n";
 var rewriteB = rewriteA.Replace("10", "20");
-File.WriteAllText(rewritePath, rewriteA); var rewriteAnalytics = new LocalUsageAnalyticsService();
+File.WriteAllText(rewritePath, rewriteA); var rewriteAnalytics = new LocalUsageAnalyticsService(() => analyticsNow);
 Assert(rewriteAnalytics.Read(5.5m, rewriteRoot).MonthTokens == 10, "rewrite fixture starts with original total");
 File.WriteAllText(rewritePath, rewriteB); File.SetLastWriteTimeUtc(rewritePath, DateTime.UtcNow.AddSeconds(2));
 Assert(rewriteAnalytics.Read(5.5m, rewriteRoot).MonthTokens == 20 && rewriteAnalytics.FilesRebuiltLastRead == 1, "same length rewrite invalidates cache");
@@ -791,7 +847,7 @@ File.WriteAllText(Path.Combine(analyticsRoot, "switch.jsonl"), """
 {"timestamp":"2026-08-12T10:01:00Z","payload":{"type":"turn_context","model":"gpt-5.6-luna"}}
 {"timestamp":"2026-08-12T10:01:00Z","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":5,"cached_input_tokens":0,"output_tokens":0,"total_tokens":5}}}}
 """);
-analytics = new LocalUsageAnalyticsService().Read(5.5m, analyticsRoot);
+analytics = new LocalUsageAnalyticsService(() => analyticsNow).Read(5.5m, analyticsRoot);
 Assert(analytics.Models.Any(x => x.Model == "unknown-model" && !x.Priced), "unknown model remains visible and unpriced");
 var threadSettingsRoot = Path.Combine(Path.GetTempPath(), "codex-tracker-thread-settings-" + Guid.NewGuid());
 Directory.CreateDirectory(threadSettingsRoot);
@@ -905,21 +961,21 @@ File.WriteAllText(Path.Combine(forksRoot, "fork.jsonl"), """
 {"type":"turn_context","timestamp":"2026-08-12T10:00:01Z","payload":{"model":"gpt-5.6-sol"}}
 {"type":"event_msg","timestamp":"2026-08-12T10:00:02Z","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":210,"cached_input_tokens":0,"output_tokens":0,"total_tokens":210}}}}
 """);
-var forked = new LocalUsageAnalyticsService().Read(5.5m, forksRoot);
+var forked = new LocalUsageAnalyticsService(() => analyticsNow).Read(5.5m, forksRoot);
 Assert(forked.MonthTokens == 390 && forked.Models.Any(x => x.Model == "gpt-5.6-terra") && forked.Models.Any(x => x.Model == "gpt-5.6-sol"), "fork counts its inherited context as tokens processed by the child rollout");
 File.WriteAllText(Path.Combine(forksRoot, "independent.jsonl"), """
 {"type":"session_meta","payload":{"session_id":"s2","id":"s2","thread_source":"root"}}
 {"timestamp":"2026-08-12T10:00:00Z","payload":{"type":"turn_context","model":"gpt-5.6-luna"}}
 {"timestamp":"2026-08-12T10:00:00Z","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":40,"cached_input_tokens":0,"output_tokens":0,"total_tokens":40}}}}
 """);
-var withIndependent = new LocalUsageAnalyticsService().Read(5.5m, forksRoot);
+var withIndependent = new LocalUsageAnalyticsService(() => analyticsNow).Read(5.5m, forksRoot);
 Assert(withIndependent.MonthTokens == 430, "independent root still counts its first snapshot");
 File.WriteAllText(Path.Combine(forksRoot, "spark.jsonl"), """
 {"type":"session_meta","payload":{"session_id":"s3","id":"s3"}}
 {"type":"turn_context","timestamp":"2026-08-12T10:00:00Z","payload":{"model":"gpt-5.3-codex-spark"}}
 {"type":"event_msg","timestamp":"2026-08-12T10:00:00Z","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":10,"cached_input_tokens":0,"output_tokens":0,"total_tokens":10}}}}
 """);
-var spark = new LocalUsageAnalyticsService().Read(5.5m, forksRoot);
+var spark = new LocalUsageAnalyticsService(() => analyticsNow).Read(5.5m, forksRoot);
 Assert(spark.Models.Any(x => x.Model == "gpt-5.3-codex-spark" && !x.Priced), "spark ID without official exact price remains unpriced");
 Directory.Delete(forksRoot, true);
 var restartRoot = Path.Combine(Path.GetTempPath(), "codex-tracker-restart-" + Guid.NewGuid());
@@ -932,10 +988,10 @@ File.WriteAllText(restartPath, """
 {"timestamp":"2026-08-12T10:02:00Z","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":10,"total_tokens":10}}}}
 {"timestamp":"2026-08-12T10:03:00Z","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":45,"total_tokens":45}}}}
 """);
-Assert(new LocalUsageAnalyticsService().Read(5.5m, restartRoot).MonthTokens == 205, "counter reset starts a new cumulative segment and counts its current snapshot");
+Assert(new LocalUsageAnalyticsService(() => analyticsNow).Read(5.5m, restartRoot).MonthTokens == 205, "counter reset starts a new cumulative segment and counts its current snapshot");
 var appendedForkPath = Path.Combine(restartRoot, "fork-append.jsonl");
 File.WriteAllText(appendedForkPath, """{"type":"session_meta","payload":{"session_id":"r1","id":"f1","forked_from_id":"r1","thread_source":"subagent"}}""" + Environment.NewLine);
-var appendForkAnalytics = new LocalUsageAnalyticsService();
+var appendForkAnalytics = new LocalUsageAnalyticsService(() => analyticsNow);
 Assert(appendForkAnalytics.Read(5.5m, restartRoot).MonthTokens == 205, "empty fork does not change usage");
 File.AppendAllText(appendedForkPath, """{"timestamp":"2026-08-12T10:04:00Z","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":45,"total_tokens":45}}}}""" + Environment.NewLine);
 Assert(appendForkAnalytics.Read(5.5m, restartRoot).MonthTokens == 250, "first fork snapshot received by append is processed context");
@@ -957,7 +1013,7 @@ File.WriteAllText(duplicateFull, File.ReadAllText(duplicateEarly) + Environment.
 {"timestamp":"2026-08-12T10:03:00Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":10,"total_tokens":10}}}}
 {"timestamp":"2026-08-12T10:04:00Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":60,"total_tokens":60}}}}
 """);
-var duplicateAnalytics = new LocalUsageAnalyticsService();
+var duplicateAnalytics = new LocalUsageAnalyticsService(() => analyticsNow);
 var duplicateUsage = duplicateAnalytics.Read(5.5m, duplicateRoot);
 Assert(duplicateUsage.MonthTokens == 260, "a prefixed checkpoint counts both cumulative segments while its shorter physical copy is ignored");
 Assert(duplicateAnalytics.LogicalStreamsLastRead == 1 && duplicateAnalytics.DuplicatePhysicalFilesIgnoredLastRead == 1, "duplicate rollout diagnostics distinguish physical files from one logical stream");
@@ -976,7 +1032,7 @@ File.WriteAllText(Path.Combine(divergentRoot, "segment-b.jsonl"), """
 {"timestamp":"2026-08-12T10:01:00Z","payload":{"type":"turn_context","model":"gpt-5.6-sol"}}
 {"timestamp":"2026-08-12T10:01:00Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":70,"total_tokens":70}}}}
 """);
-var divergentAnalytics = new LocalUsageAnalyticsService();
+var divergentAnalytics = new LocalUsageAnalyticsService(() => analyticsNow);
 Assert(divergentAnalytics.Read(5.5m, divergentRoot).MonthTokens == 170, "same metadata id without a physical prefix remains independent evidence rather than being discarded");
 Assert(divergentAnalytics.DuplicatePhysicalFilesIgnoredLastRead == 0, "only proven physical checkpoint prefixes are deduplicated");
 Directory.Delete(divergentRoot, true);

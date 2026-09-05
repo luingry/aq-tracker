@@ -88,7 +88,7 @@ public partial class MainWindow : Window
         _unreadAgentWorks = (_settings.UnreadAgentWorks ?? []).OrderByDescending(work => work.CompletedAt).ToList();
         _observedCompletionIds.UnionWith(_unreadAgentWorks.Select(work => work.CompletionId));
         LocalizationManager.Apply(_settings.LanguageCode);
-        _viewModel = new MainViewModel();
+        _viewModel = new MainViewModel(new QuotaSnapshotStore());
         InitializeComponent();
         AddHandler(Mouse.PreviewMouseDownEvent, new MouseButtonEventHandler(OnWindowPreviewMouseDown), true);
         AddHandler(Mouse.PreviewMouseMoveEvent, new System.Windows.Input.MouseEventHandler(OnWindowPreviewMouseMove), true);
@@ -97,12 +97,18 @@ public partial class MainWindow : Window
         Deactivated += (_, _) => { if (_manualResize) FinishManualResize(false); };
         Chrome.IsHitTestVisible = false;
         DataContext = _viewModel;
+        _viewModel.PropertyChanged += (_, eventArgs) =>
+        {
+            if (eventArgs.PropertyName is nameof(MainViewModel.ShowCompactFiveHour) or nameof(MainViewModel.ShowCompactWeekly) or nameof(MainViewModel.CompactQuotaCount))
+                ApplyWindowModeSize();
+        };
         _demo = demo;
         _pendingAccentColor = _settings.AccentColor;
         Topmost = _settings.IsTopmost;
         ThemeManager.Apply(_settings.Theme, _settings.AccentColor);
         _viewModel.Topmost = Topmost;
         _viewModel.SetCurrency(_settings.CurrencyCode);
+        _viewModel.SetCompactQuotaDisplay(_settings.CompactQuotaDisplay);
         _viewModel.Expanded = _settings.IsExpanded;
         _viewModel.IsAgentListOpen = false;
         _viewModel.ApplyUnreadCompletedAgents(_unreadAgentWorks);
@@ -133,7 +139,8 @@ public partial class MainWindow : Window
     {
         if (_demo)
         {
-            _viewModel.Apply(new RateLimitSnapshot([new("codex:primary", "Weekly limit", 16, DateTimeOffset.Now.AddDays(3), 10080)], "demo", "Credits: unlimited", "Reset credits: 2", DateTimeOffset.UtcNow), new(12400, 240300, 11.4m, 16, 100, [new("gpt-5.6-terra", 240300, 11.4m, true)]), _settings.CurrencyCode);
+            _viewModel.Apply(new RateLimitSnapshot([new("codex:primary", "5-hour limit", 16, DateTimeOffset.Now.AddHours(3), 300), new("codex:secondary", "Weekly limit", 42, DateTimeOffset.Now.AddDays(3), 10080)], "demo", "Credits: unlimited", "Reset credits: 2", DateTimeOffset.UtcNow), new(12400, 240300, 11.4m, 16, 100, [new("gpt-5.6-terra", 240300, 11.4m, true)]), _settings.CurrencyCode);
+            ApplyWindowModeSize();
             return;
         }
         if (Interlocked.Exchange(ref _connecting, 1) == 1) return;
@@ -173,13 +180,15 @@ public partial class MainWindow : Window
                 {
                     if (!_startupAnalytics.IsCurrent(connectionGeneration)) return;
                     _viewModel.ApplyQuota(snapshot);
+                    ApplyWindowModeSize();
                     if (pendingUsage is not null && _viewModel.Expanded)
                         _viewModel.Apply(snapshot, pendingUsage, _settings.CurrencyCode);
                     else
                         ApplyCachedAnalyticsIfDetailed(snapshot);
                 });
-                var weekly = snapshot.Windows.FirstOrDefault(x => x.Id == "codex:primary" && x.WindowDurationMins >= 10000);
-                SanitizedLogger.Write($"Quota snapshot summary: windows={snapshot.Windows.Count}, weekly={(weekly is null ? "missing" : weekly.UsedPercent.ToString("0.0", System.Globalization.CultureInfo.InvariantCulture))}");
+                var weekly = OfficialCodexQuotaWindows.Weekly(snapshot.Windows);
+                var fiveHour = OfficialCodexQuotaWindows.FiveHours(snapshot.Windows);
+                SanitizedLogger.Write($"Quota snapshot summary: windows={snapshot.Windows.Count}, 5h={(fiveHour is null ? "missing" : fiveHour.UsedPercent.ToString("0.0", System.Globalization.CultureInfo.InvariantCulture))}, weekly={(weekly is null ? "missing" : weekly.UsedPercent.ToString("0.0", System.Globalization.CultureInfo.InvariantCulture))}");
             };
             client.StatusChanged += statusChanged;
             client.SnapshotUpdated += snapshotUpdated;
@@ -699,6 +708,7 @@ public partial class MainWindow : Window
         _pendingAccentColor = _settings.AccentColor;
         UpdateAccentPreview();
         CurrencyBox.SelectedIndex = SettingsStore.NormalizeCurrency(_settings.CurrencyCode) == "USD" ? 1 : 0;
+        CompactQuotaBox.SelectedIndex = _settings.CompactQuotaDisplay == "5h" ? 0 : _settings.CompactQuotaDisplay == "7d" ? 1 : 2;
         UpdateCurrencyRateVisibility();
         RateBox.Text = _settings.UsdBrl.ToString(System.Globalization.CultureInfo.InvariantCulture);
         var automaticallyDetectedPath = CodexExecutableDiscovery.Find(null);
@@ -750,16 +760,18 @@ public partial class MainWindow : Window
         decimal.TryParse(RateBox.Text.Replace(',', '.'), System.Globalization.NumberStyles.Number, System.Globalization.CultureInfo.InvariantCulture, out var rate);
         var theme = ThemeToggle.IsChecked == true ? "Escuro" : "Claro";
         var currency = SettingsStore.NormalizeCurrency((CurrencyBox.SelectedItem as ComboBoxItem)?.Tag as string);
+        var compactQuotaDisplay = SettingsStore.NormalizeCompactQuotaDisplay((CompactQuotaBox.SelectedItem as ComboBoxItem)?.Tag as string);
         var language = LocalizationManager.NormalizeLanguage((LanguageBox.SelectedItem as ComboBoxItem)?.Tag as string);
         var manualCodexPath = CodexPathFallbackPanel.Visibility == Visibility.Visible
             ? string.IsNullOrWhiteSpace(PathBox.Text) ? null : PathBox.Text
             : _settings.CodexPath;
-        _settings = _settings with { CodexPath = manualCodexPath, UsdBrl = rate > 0 ? rate : 5.5m, Theme = theme, CurrencyCode = currency, AccentColor = AccentPalette.Normalize(_pendingAccentColor), LanguageCode = language };
+        _settings = _settings with { CodexPath = manualCodexPath, UsdBrl = rate > 0 ? rate : 5.5m, Theme = theme, CurrencyCode = currency, AccentColor = AccentPalette.Normalize(_pendingAccentColor), LanguageCode = language, CompactQuotaDisplay = compactQuotaDisplay };
         LocalizationManager.Apply(language);
         ThemeManager.Apply(theme, _settings.AccentColor);
         CreateTray();
         ApplyBackdrop(theme);
         _viewModel.SetCurrency(currency);
+        _viewModel.SetCompactQuotaDisplay(compactQuotaDisplay);
         _viewModel.RefreshLocalization();
         _viewModel.Expanded = DetailedBox.IsChecked == true;
         Topmost = TopmostBox.IsChecked == true;
@@ -952,24 +964,25 @@ public partial class MainWindow : Window
 
     private ResizeEdge GetCompactResizeEdge(System.Windows.Point position)
     {
-        var bounds = CompactQuotaGauge.TransformToAncestor(this)
-            .TransformBounds(new Rect(0, 0, CompactQuotaGauge.ActualWidth, CompactQuotaGauge.ActualHeight));
-        if (bounds.Width <= 0 || bounds.Height <= 0) return ResizeEdge.None;
-
-        var halfWidth = bounds.Width / 2d;
-        var halfHeight = bounds.Height / 2d;
-        var horizontal = (position.X - (bounds.Left + halfWidth)) / halfWidth;
-        var vertical = (position.Y - (bounds.Top + halfHeight)) / halfHeight;
-        var radius = Math.Sqrt(horizontal * horizontal + vertical * vertical);
-        if (radius < 1d - ResizeBorderThickness / Math.Min(halfWidth, halfHeight) || radius > 1.05d)
-            return ResizeEdge.None;
-
-        var edge = ResizeEdge.None;
-        if (horizontal <= -0.45d) edge |= ResizeEdge.Left;
-        if (horizontal >= 0.45d) edge |= ResizeEdge.Right;
-        if (vertical <= -0.45d) edge |= ResizeEdge.Top;
-        if (vertical >= 0.45d) edge |= ResizeEdge.Bottom;
-        return edge;
+        foreach (FrameworkElement gauge in new FrameworkElement[] { CompactFiveHourGauge, CompactWeeklyGauge })
+        {
+            if (gauge.Visibility != Visibility.Visible) continue;
+            var bounds = gauge.TransformToAncestor(this).TransformBounds(new Rect(0, 0, gauge.ActualWidth, gauge.ActualHeight));
+            if (bounds.Width <= 0 || bounds.Height <= 0) continue;
+            var halfWidth = bounds.Width / 2d;
+            var halfHeight = bounds.Height / 2d;
+            var horizontal = (position.X - (bounds.Left + halfWidth)) / halfWidth;
+            var vertical = (position.Y - (bounds.Top + halfHeight)) / halfHeight;
+            var radius = Math.Sqrt(horizontal * horizontal + vertical * vertical);
+            if (radius < 1d - ResizeBorderThickness / Math.Min(halfWidth, halfHeight) || radius > 1.05d) continue;
+            var edge = ResizeEdge.None;
+            if (horizontal <= -0.45d) edge |= ResizeEdge.Left;
+            if (horizontal >= 0.45d) edge |= ResizeEdge.Right;
+            if (vertical <= -0.45d) edge |= ResizeEdge.Top;
+            if (vertical >= 0.45d) edge |= ResizeEdge.Bottom;
+            return edge;
+        }
+        return ResizeEdge.None;
     }
 
     private static System.Windows.Input.Cursor CursorFor(ResizeEdge edge) => edge switch
@@ -1003,7 +1016,7 @@ public partial class MainWindow : Window
             return;
         }
 
-        var compactBounds = ManualResizeGeometry.ResizeCompact(start, delta, handle, _resizeWorkArea, CompactMinWidth, CompactMaxWidth);
+        var compactBounds = ManualResizeGeometry.ResizeCompact(start, delta, handle, _resizeWorkArea, CompactWidthFloor, CompactWidthCap, CompactResizeAspectRatio, CompactResizeHeightOffset);
         Left = compactBounds.Left;
         Top = compactBounds.Top - (_viewModel.HasAgentIndicator && handle.HasFlag(ResizeHandle.Top) ? CompactAgentIndicatorHeight : 0d);
         SetCompactSize(compactBounds.Width);
@@ -1094,11 +1107,11 @@ public partial class MainWindow : Window
         }
         else
         {
-            MinWidth = CompactMinWidth;
-            MaxWidth = CompactMaxWidth;
-            MinHeight = CompactMinWidth / CompactAspectRatio + ActiveCompactExtraHeight;
-            MaxHeight = CompactMaxWidth / CompactAspectRatio + ActiveCompactExtraHeight;
-            SetCompactSize(size.Width);
+            MinWidth = CompactWidthFloor;
+            MaxWidth = CompactWidthCap;
+            MinHeight = CompactHeightForWidth(CompactWidthFloor) + ActiveCompactExtraHeight;
+            MaxHeight = CompactHeightForWidth(CompactWidthCap) + ActiveCompactExtraHeight;
+            SetCompactSize(CompactWidthForStoredSize(size.Width));
         }
         ApplyBackdrop(_settings.Theme);
     }
@@ -1139,22 +1152,35 @@ public partial class MainWindow : Window
     private void SetCompactSize(double width)
     {
         Width = width;
-        Height = width / CompactAspectRatio + ActiveCompactExtraHeight;
+        Height = CompactHeightForWidth(width) + ActiveCompactExtraHeight;
     }
+    private bool ShowsBothCompactQuotas => _viewModel.ShowCompactFiveHour && _viewModel.ShowCompactWeekly;
+    private double CompactWidthFloor => ShowsBothCompactQuotas ? CompactWidthForStoredSize(CompactMinWidth) : CompactMinWidth;
+    private double CompactWidthCap => ShowsBothCompactQuotas ? CompactWidthForStoredSize(CompactMaxWidth) : CompactMaxWidth;
+    private double CompactResizeHeightOffset => ShowsBothCompactQuotas ? 4d : 0d;
+    private double CompactResizeAspectRatio => CompactWidthFloor / (CompactHeightForWidth(CompactWidthFloor) - CompactResizeHeightOffset);
+    private double CompactHeightForWidth(double width) => StoredCompactWidth(width) / CompactAspectRatio;
+    private double CompactWidthForStoredSize(double width) => ShowsBothCompactQuotas
+        ? 2d * (width / CompactAspectRatio - CompactGaugeLayoutPolicy.GaugeInset) + 12d
+        : width;
+    private double StoredCompactWidth(double width) => ShowsBothCompactQuotas
+        ? ((width - 12d) / 2d + CompactGaugeLayoutPolicy.GaugeInset) * CompactAspectRatio
+        : width;
     private double ActiveCompactExtraHeight => _viewModel.HasAgentIndicator ? CompactAgentIndicatorHeight : 0d;
     private void ApplyCompactAgentIndicatorSize()
     {
         if (CurrentVisualMode != WidgetVisualMode.Compact) return;
-        MinHeight = CompactMinWidth / CompactAspectRatio + ActiveCompactExtraHeight;
-        MaxHeight = CompactMaxWidth / CompactAspectRatio + ActiveCompactExtraHeight;
-        SetCompactSize(Width);
+        MinHeight = CompactHeightForWidth(CompactWidthFloor) + ActiveCompactExtraHeight;
+        MaxHeight = CompactHeightForWidth(CompactWidthCap) + ActiveCompactExtraHeight;
+        SetCompactSize(Math.Max(Width, CompactWidthFloor));
     }
     private WidgetVisualMode CurrentVisualMode => SettingsPanel.Visibility == Visibility.Visible
         ? WidgetVisualMode.Settings
         : _viewModel.Expanded ? WidgetVisualMode.Detailed : WidgetVisualMode.Compact;
     private void CaptureCurrentModeSize()
     {
-        _settings = _settings with { ModeSizes = WidgetSizePolicy.With(_settings.ModeSizes!, CurrentVisualMode, new(Width, Height)) };
+        var savedWidth = CurrentVisualMode == WidgetVisualMode.Compact ? StoredCompactWidth(Width) : Width;
+        _settings = _settings with { ModeSizes = WidgetSizePolicy.With(_settings.ModeSizes!, CurrentVisualMode, new(savedWidth, Height)) };
     }
     private void Save()
     {

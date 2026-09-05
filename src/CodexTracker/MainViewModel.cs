@@ -151,14 +151,15 @@ public sealed class AgentActivityRow : INotifyPropertyChanged
 public sealed class MainViewModel : INotifyPropertyChanged
 {
     public event PropertyChangedEventHandler? PropertyChanged;
-    private string _weekly = "--", _weeklyTokens = "--", _weeklyCost = "--", _reset = LocalizationManager.Text("LoadingWeeklyQuota"), _today = "--", _month = "--", _cost = "--", _todayCost = "--", _monthCost = "--", _coverage = "", _forecast = LocalizationManager.Text("InsufficientData"), _status = LocalizationManager.Text("Loading"), _currencyCode = "BRL";
+    private string _weekly = "--", _fiveHour = "--", _fiveHourReset = "", _weeklyTokens = "--", _weeklyCost = "--", _reset = LocalizationManager.Text("LoadingWeeklyQuota"), _today = "--", _month = "--", _cost = "--", _todayCost = "--", _monthCost = "--", _coverage = "", _forecast = LocalizationManager.Text("InsufficientData"), _status = LocalizationManager.Text("Loading"), _currencyCode = "BRL", _compactQuotaDisplay = "both";
     private bool _expanded, _topmost, _isExhaustionRisk;
     private bool _hasActiveAgents, _hasUnreadCompletedAgents, _isAgentListOpen;
     private bool _isUpdateDialogOpen, _isUpdateDownloading;
     private double _updateProgress;
     private string _updateAvailableVersion = "", _updateStatusMessage = "", _updateCheckFeedback = "";
     private int _activeAgentCount, _unreadCompletedAgentCount;
-    private double _remainingPercent;
+    private double _remainingPercent, _fiveHourRemainingPercent;
+    private bool _hasFiveHourQuota;
     private long? _weeklyTokenCount;
     private decimal _lastTodayUsd, _lastTodayBrl, _lastMonthUsd, _lastMonthBrl;
     private UsageWindowEstimate? _lastWeeklyEstimate;
@@ -170,6 +171,9 @@ public sealed class MainViewModel : INotifyPropertyChanged
     private RankingPeriod _rankingPeriod = RankingPeriod.Month;
     private bool _hasAnalytics;
     private bool _hasVisibleChatProjects;
+    private readonly QuotaSnapshotStore _quotaSnapshotStore;
+    private readonly Func<DateTimeOffset> _clock;
+    public MainViewModel(QuotaSnapshotStore? quotaSnapshotStore = null, Func<DateTimeOffset>? clock = null) { _quotaSnapshotStore = quotaSnapshotStore ?? new QuotaSnapshotStore(persistent: false); _clock = clock ?? (() => DateTimeOffset.Now); }
     private string _chatSearch = "";
     private IReadOnlyList<AgentActivityRow> _completedAgentRows = [];
     public ObservableCollection<RankingRow> Ranking { get; } = [];
@@ -196,10 +200,13 @@ public sealed class MainViewModel : INotifyPropertyChanged
     }
     public string AppVersion { get; } = $"v{Assembly.GetExecutingAssembly().GetName().Version?.ToString(3) ?? "0.0.0"}";
     public string Weekly { get => _weekly; set => Set(ref _weekly, value); }
+    public string FiveHour { get => _fiveHour; private set => Set(ref _fiveHour, value); }
+    public string FiveHourReset { get => _fiveHourReset; private set => Set(ref _fiveHourReset, value); }
     public string WeeklyTokens { get => _weeklyTokens; private set => Set(ref _weeklyTokens, value); }
     public long? WeeklyTokenCount { get => _weeklyTokenCount; private set => Set(ref _weeklyTokenCount, value); }
     public string WeeklyCost { get => _weeklyCost; private set => Set(ref _weeklyCost, value); }
     public IReadOnlyList<DailyTokenUsage> DailyTokenSeries { get; private set; } = [];
+    public IReadOnlyList<DailyQuotaUsage> DailyQuotaSeries { get; private set; } = [];
     public string Reset { get => _reset; set => Set(ref _reset, value); }
     public string Today { get => _today; set => Set(ref _today, value); }
     public string Month { get => _month; set => Set(ref _month, value); }
@@ -237,6 +244,11 @@ public sealed class MainViewModel : INotifyPropertyChanged
     public int ActiveAgentCount { get => _activeAgentCount; private set => Set(ref _activeAgentCount, value); }
     public int UnreadCompletedAgentCount { get => _unreadCompletedAgentCount; private set => Set(ref _unreadCompletedAgentCount, value); }
     public double RemainingPercent { get => _remainingPercent; set => Set(ref _remainingPercent, value); }
+    public double FiveHourRemainingPercent { get => _fiveHourRemainingPercent; private set => Set(ref _fiveHourRemainingPercent, value); }
+    public bool HasFiveHourQuota { get => _hasFiveHourQuota; private set => Set(ref _hasFiveHourQuota, value); }
+    public bool ShowCompactFiveHour => HasFiveHourQuota && _compactQuotaDisplay is "5h" or "both";
+    public bool ShowCompactWeekly => _compactQuotaDisplay is "7d" or "both";
+    public int CompactQuotaCount => (ShowCompactFiveHour ? 1 : 0) + (ShowCompactWeekly ? 1 : 0);
     public bool IsUpdateDialogOpen { get => _isUpdateDialogOpen; set => Set(ref _isUpdateDialogOpen, value); }
     public bool IsUpdateDownloading { get => _isUpdateDownloading; set => Set(ref _isUpdateDownloading, value); }
     public double UpdateProgress { get => _updateProgress; set => Set(ref _updateProgress, value); }
@@ -257,6 +269,16 @@ public sealed class MainViewModel : INotifyPropertyChanged
     public bool IsRankingDay { get => _rankingPeriod == RankingPeriod.Day; set { if (value) SetRankingPeriod(RankingPeriod.Day); } }
     public bool IsRankingWeek { get => _rankingPeriod == RankingPeriod.Week; set { if (value) SetRankingPeriod(RankingPeriod.Week); } }
     public bool IsRankingMonth { get => _rankingPeriod == RankingPeriod.Month; set { if (value) SetRankingPeriod(RankingPeriod.Month); } }
+
+    public void SetCompactQuotaDisplay(string? display)
+    {
+        var normalized = SettingsStore.NormalizeCompactQuotaDisplay(display);
+        if (_compactQuotaDisplay == normalized) return;
+        _compactQuotaDisplay = normalized;
+        PropertyChanged?.Invoke(this, new(nameof(ShowCompactFiveHour)));
+        PropertyChanged?.Invoke(this, new(nameof(ShowCompactWeekly)));
+        PropertyChanged?.Invoke(this, new(nameof(CompactQuotaCount)));
+    }
 
     public void ApplyAgents(IReadOnlyList<ActiveAgent> agents, DateTimeOffset now, bool animateNewRows, bool? animationsEnabled = null)
     {
@@ -373,7 +395,8 @@ public sealed class MainViewModel : INotifyPropertyChanged
 
     public void ApplyQuota(RateLimitSnapshot snapshot)
     {
-        var weekly = snapshot.Windows.FirstOrDefault(x => x.Id == "codex:primary" && x.WindowDurationMins >= 10000);
+        var weekly = OfficialCodexQuotaWindows.Weekly(snapshot.Windows);
+        ApplyCompactQuotaWindows(snapshot.Windows);
         _lastWeekly = weekly;
         _hasQuotaSnapshot = true;
         UpdateActiveQuotaCycle(weekly);
@@ -381,6 +404,7 @@ public sealed class MainViewModel : INotifyPropertyChanged
         RemainingPercent = weekly?.RemainingPercent ?? 0;
         Reset = weekly is null ? LocalizationManager.Text("QuotaNotReported") : ResetCountdown.Format(weekly.ResetsAt, DateTimeOffset.Now, LocalizationManager.CurrentLanguageCode);
         ApplyForecast(WeeklyForecastCalculator.Calculate(weekly, snapshot.ReceivedAt));
+        RefreshDailyQuotaSeries(weekly, snapshot.ReceivedAt);
         Status = weekly is null ? LocalizationManager.Text("NoLiveData") : LocalizationManager.Text("LiveData");
     }
 
@@ -393,7 +417,8 @@ public sealed class MainViewModel : INotifyPropertyChanged
 
     public void Apply(RateLimitSnapshot snapshot, UsageAnalytics analytics, string? currencyCode = null)
     {
-        var weekly = snapshot.Windows.FirstOrDefault(x => x.Id == "codex:primary" && x.WindowDurationMins >= 10000);
+        var weekly = OfficialCodexQuotaWindows.Weekly(snapshot.Windows);
+        ApplyCompactQuotaWindows(snapshot.Windows);
         _lastWeekly = weekly;
         _hasQuotaSnapshot = true;
         UpdateActiveQuotaCycle(weekly);
@@ -405,6 +430,7 @@ public sealed class MainViewModel : INotifyPropertyChanged
         PropertyChanged?.Invoke(this, new(nameof(DailyTokenSeries)));
         _lastWeeklyEstimate = analytics.EstimateInWeeklyWindow(weekly);
         _lastAnalytics = analytics;
+        RefreshDailyQuotaSeries(weekly, snapshot.ReceivedAt);
         RefreshChatDetails();
         WeeklyTokenCount = _lastWeeklyEstimate?.Tokens;
         WeeklyTokens = WeeklyTokenCount is { } weeklyTokens ? TokenPresentation.Format(weeklyTokens, LocalizationManager.CurrentLanguageCode) : "--";
@@ -416,6 +442,27 @@ public sealed class MainViewModel : INotifyPropertyChanged
         ApplyForecast(WeeklyForecastCalculator.Calculate(weekly, snapshot.ReceivedAt));
         RefreshRanking();
         Status = weekly is null ? LocalizationManager.Text("NoLiveData") : LocalizationManager.Text("LiveData");
+    }
+
+    private void ApplyCompactQuotaWindows(IEnumerable<QuotaWindow> windows)
+    {
+        var fiveHour = OfficialCodexQuotaWindows.FiveHours(windows);
+        HasFiveHourQuota = fiveHour is not null;
+        FiveHour = QuotaPresentation.FormatWeeklyRemaining(fiveHour);
+        FiveHourRemainingPercent = fiveHour?.RemainingPercent ?? 0;
+        FiveHourReset = fiveHour is null ? "" : ResetCountdown.Format(fiveHour.ResetsAt, DateTimeOffset.Now, LocalizationManager.CurrentLanguageCode);
+        PropertyChanged?.Invoke(this, new(nameof(ShowCompactFiveHour)));
+        PropertyChanged?.Invoke(this, new(nameof(ShowCompactWeekly)));
+        PropertyChanged?.Invoke(this, new(nameof(CompactQuotaCount)));
+    }
+
+    private void RefreshDailyQuotaSeries(QuotaWindow? weekly, DateTimeOffset receivedAt)
+    {
+        var now = _clock();
+        var official = weekly is null ? _quotaSnapshotStore.Read() : _quotaSnapshotStore.Append(receivedAt, weekly.UsedPercent);
+        var history = (_lastAnalytics?.QuotaTimeline ?? []).Concat(official).GroupBy(x => x.At).Select(group => group.Last());
+        DailyQuotaSeries = CodexTracker.Core.DailyQuotaSeries.CloseByLocalDay(history, now.LocalDateTime.Date, now);
+        PropertyChanged?.Invoke(this, new(nameof(DailyQuotaSeries)));
     }
 
     private void SetRankingPeriod(RankingPeriod period)

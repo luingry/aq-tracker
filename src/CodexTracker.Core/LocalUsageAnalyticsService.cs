@@ -18,11 +18,13 @@ public sealed record TokenUsageBreakdown(long CachedReadTokens, long InputTokens
 
 public sealed record ModelUsage(string Model, long Tokens, decimal CostUsd, bool Priced, TokenUsageBreakdown? Breakdown = null);
 public sealed record DailyTokenUsage(DateTime Day, long Tokens, decimal UsdCost = 0, decimal BrlCost = 0, TokenUsageBreakdown? Breakdown = null);
+public sealed record DailyQuotaUsage(DateTime Day, double? UsedPercent);
+public sealed record TimedQuotaUsage(DateTimeOffset At, double UsedPercent);
 public sealed record TimedTokenUsage(DateTimeOffset At, long Tokens, decimal CostUsd = 0, TokenUsageBreakdown? Breakdown = null);
 public sealed record TimedModelUsage(DateTimeOffset At, string Model, long Tokens, decimal CostUsd = 0, bool Priced = false, TokenUsageBreakdown? Breakdown = null);
 public sealed record ChatUsage(string ThreadId, string? ProjectPath, string? Title, long Tokens, decimal CostUsd, long PricedTokens, TokenUsageBreakdown Breakdown, DateTimeOffset LastUpdatedAt);
 public sealed record UsageWindowEstimate(long Tokens, decimal CostUsd, decimal CostBrl);
-public sealed record UsageAnalytics(long TodayTokens, long MonthTokens, decimal MonthUsd, decimal MonthBrl, double CoveragePercent, IReadOnlyList<ModelUsage> Models, decimal TodayUsd = 0, decimal TodayBrl = 0, IReadOnlyList<DailyTokenUsage>? DailySeries = null, IReadOnlyList<TimedTokenUsage>? Timeline = null, decimal UsdBrl = 0, IReadOnlyList<TimedModelUsage>? ModelTimeline = null, IReadOnlyList<ChatUsage>? Chats = null)
+public sealed record UsageAnalytics(long TodayTokens, long MonthTokens, decimal MonthUsd, decimal MonthBrl, double CoveragePercent, IReadOnlyList<ModelUsage> Models, decimal TodayUsd = 0, decimal TodayBrl = 0, IReadOnlyList<DailyTokenUsage>? DailySeries = null, IReadOnlyList<TimedTokenUsage>? Timeline = null, decimal UsdBrl = 0, IReadOnlyList<TimedModelUsage>? ModelTimeline = null, IReadOnlyList<ChatUsage>? Chats = null, IReadOnlyList<TimedQuotaUsage>? QuotaTimeline = null)
 {
     public long TokensInWindow(DateTimeOffset startInclusive, DateTimeOffset endExclusive) =>
         (Timeline ?? []).Where(x => x.At >= startInclusive && x.At < endExclusive).Sum(x => x.Tokens);
@@ -49,6 +51,27 @@ public sealed record UsageAnalytics(long TodayTokens, long MonthTokens, decimal 
     public UsageWindowEstimate? EstimateInWeeklyWindow(QuotaWindow? weekly) => weekly?.ResetsAt is { } reset
         ? EstimateInWindow(reset.AddDays(-7), reset)
         : null;
+}
+
+/// <summary>Chooses the closing weekly-quota reading for each local calendar day.</summary>
+public static class DailyQuotaSeries
+{
+    public static IReadOnlyList<DailyQuotaUsage> CloseByLocalDay(IEnumerable<TimedQuotaUsage> readings, DateTime month, DateTimeOffset now, double? liveTodayPercent = null)
+    {
+        var first = new DateTime(month.Year, month.Month, 1);
+        var lastDay = DateTime.DaysInMonth(month.Year, month.Month);
+        var closing = readings.Where(x => Net48Compatibility.IsFinite(x.UsedPercent) && x.At <= now && x.At.LocalDateTime.Year == month.Year && x.At.LocalDateTime.Month == month.Month)
+            .GroupBy(x => x.At.LocalDateTime.Date)
+            .ToDictionary(group => group.Key, group => group.OrderBy(x => x.At).Last().UsedPercent);
+        var today = now.LocalDateTime.Date;
+        return Enumerable.Range(1, lastDay).Select(day =>
+        {
+            var date = first.AddDays(day - 1);
+            if (date > today) return new DailyQuotaUsage(date, null);
+            if (date == today && liveTodayPercent.HasValue && Net48Compatibility.IsFinite(liveTodayPercent.Value)) return new DailyQuotaUsage(date, Net48Compatibility.Clamp(liveTodayPercent.Value, 0, 100));
+            return new DailyQuotaUsage(date, closing.TryGetValue(date, out var value) ? Net48Compatibility.Clamp(value, 0, 100) : null);
+        }).ToArray();
+    }
 }
 
 public sealed class LocalUsageAnalyticsService
@@ -108,6 +131,7 @@ public sealed class LocalUsageAnalyticsService
         var buckets = new Dictionary<BucketKey, Aggregate>();
         var timeline = new Dictionary<TimelineKey, TimelineAggregate>();
         var modelTimeline = new Dictionary<ModelTimelineKey, TimelineAggregate>();
+        var quotaTimeline = new Dictionary<QuotaTimelineKey, TimedQuotaUsage>();
         var roots = root is not null
             ? [root]
             : DefaultRoots(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile));
@@ -175,13 +199,14 @@ public sealed class LocalUsageAnalyticsService
                 MergeBuckets(cached.Buckets, parsed.Buckets);
                 MergeTimeline(cached.Timeline, parsed.Timeline);
                 MergeModelTimeline(cached.ModelTimeline, parsed.ModelTimeline);
+                MergeQuotaTimeline(cached.QuotaTimeline, parsed.QuotaTimeline);
                 cached = cached with { Signature = plan.Signature, FallbackModel = plan.FallbackModel, LastTotals = parsed.LastTotals ?? cached.LastTotals, LastModel = parsed.LastModel, LastUsageAt = MostRecent(cached.LastUsageAt, parsed.LastUsageAt), PrefixMarker = PrefixMarker.Create(plan.File.Path, plan.Signature.Length) };
                 FilesAppendedLastRead++;
                 BytesReadLastRead += plan.Signature.Length - previousLength;
             }
             else
             {
-                cached = new CachedFile(plan.Signature, plan.File.IsFork, plan.FallbackModel, parsed.Buckets, parsed.Timeline, parsed.ModelTimeline, parsed.LastTotals, parsed.LastModel, parsed.LastUsageAt, plan.Kind == ParseKind.Partial ? "" : PrefixMarker.Create(plan.File.Path, plan.Signature.Length));
+                cached = new CachedFile(plan.Signature, plan.File.IsFork, plan.FallbackModel, parsed.Buckets, parsed.Timeline, parsed.ModelTimeline, parsed.QuotaTimeline, parsed.LastTotals, parsed.LastModel, parsed.LastUsageAt, plan.Kind == ParseKind.Partial ? "" : PrefixMarker.Create(plan.File.Path, plan.Signature.Length));
                 FilesRebuiltLastRead++;
                 BytesReadLastRead += plan.Signature.Length;
             }
@@ -206,6 +231,7 @@ public sealed class LocalUsageAnalyticsService
             MergeBuckets(buckets, candidate.Cache.Buckets);
             MergeTimeline(timeline, candidate.Cache.Timeline);
             MergeModelTimeline(modelTimeline, candidate.Cache.ModelTimeline);
+            MergeQuotaTimeline(quotaTimeline, candidate.Cache.QuotaTimeline);
         }
         LogicalStreamsLastRead = logicalCandidates.Length;
         DuplicatePhysicalFilesIgnoredLastRead = candidates.Count - logicalCandidates.Length;
@@ -268,7 +294,8 @@ public sealed class LocalUsageAnalyticsService
         var timedSeries = timeline.OrderBy(x => x.Key.At).Select(x => new TimedTokenUsage(x.Key.At, x.Value.Tokens, x.Value.CostUsd, x.Value.Breakdown)).ToArray();
         var timedModelSeries = modelTimeline.OrderBy(x => x.Key.At).Select(x => new TimedModelUsage(x.Key.At, x.Key.Model, x.Value.Tokens, x.Value.CostUsd, x.Key.Priced, x.Value.Breakdown)).ToArray();
         SanitizedLogger.Write("Analytics refreshed: models=" + models.Length + ", files=" + files.Length + ", streams=" + LogicalStreamsLastRead + ", duplicateSnapshots=" + DuplicatePhysicalFilesIgnoredLastRead + ", ms=" + stopwatch.ElapsedMilliseconds);
-        return new(todayBuckets.Sum(x => x.Value.Total), total, models.Sum(x => x.CostUsd), models.Sum(x => x.CostUsd) * usdBrl, total == 0 ? 0 : 100d * models.Where(x => x.Priced).Sum(x => x.Tokens) / total, models, todayUsd, todayUsd * usdBrl, dailySeries, timedSeries, usdBrl, timedModelSeries, chats);
+        var quotaSeries = quotaTimeline.Values.OrderBy(x => x.At).ToArray();
+        return new(todayBuckets.Sum(x => x.Value.Total), total, models.Sum(x => x.CostUsd), models.Sum(x => x.CostUsd) * usdBrl, total == 0 ? 0 : 100d * models.Where(x => x.Priced).Sum(x => x.Tokens) / total, models, todayUsd, todayUsd * usdBrl, dailySeries, timedSeries, usdBrl, timedModelSeries, chats, quotaSeries);
     }
 
     private static TokenUsageBreakdown CalculateBreakdown(IEnumerable<Aggregate> aggregates, (decimal Input, decimal Cached, decimal Output)? price = null)
@@ -378,6 +405,7 @@ public sealed class LocalUsageAnalyticsService
         var buckets = new Dictionary<BucketKey, Aggregate>();
         var timeline = new Dictionary<TimelineKey, TimelineAggregate>();
         var modelTimeline = new Dictionary<ModelTimelineKey, TimelineAggregate>();
+        var quotaTimeline = new Dictionary<QuotaTimelineKey, TimedQuotaUsage>();
         using var stream = new FileStream(file, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
         stream.Seek(offset, SeekOrigin.Begin);
         using var bounded = new BoundedReadStream(stream, Math.Max(0, snapshotLength - offset));
@@ -392,12 +420,18 @@ public sealed class LocalUsageAnalyticsService
                 using var doc = JsonDocument.Parse(line); var root = doc.RootElement;
                 if (!root.TryGetProperty("payload", out var payload) || payload.ValueKind != JsonValueKind.Object) continue;
                 var top = ReadString(root, "type"); var legacy = ReadString(payload, "type");
+                var at = ReadTimestamp(root) ?? File.GetLastWriteTimeUtc(file);
+                if (TryReadWeeklyQuota(payload, out var usedPercent))
+                {
+                    var quotaKey = new QuotaTimelineKey(at.LocalDateTime.Date);
+                    if (!quotaTimeline.TryGetValue(quotaKey, out var prior) || at > prior.At) quotaTimeline[quotaKey] = new TimedQuotaUsage(at, usedPercent);
+                }
                 if ((top == "turn_context" || legacy == "turn_context") && ReadString(payload, "model") is { } currentModel) model = currentModel;
                 else if (top == "event_msg" && legacy == "thread_settings_applied" &&
                          payload.TryGetProperty("thread_settings", out var settings) && settings.ValueKind == JsonValueKind.Object &&
                          ReadString(settings, "model") is { } settingsModel) model = settingsModel;
                 var type = top == "event_msg" ? ReadString(payload, "type") : legacy;
-                if (type != "token_count" || !payload.TryGetProperty("info", out var info) || !info.TryGetProperty("total_token_usage", out var total)) continue;
+                if (type != "token_count" || !payload.TryGetProperty("info", out var info) || info.ValueKind != JsonValueKind.Object || !info.TryGetProperty("total_token_usage", out var total)) continue;
                 var current = Totals.From(total); if (current is null) continue;
                 // total_token_usage is cumulative per rollout. Its first snapshot is work processed
                 // by that rollout even when context was inherited by a fork. A component decrease
@@ -406,7 +440,6 @@ public sealed class LocalUsageAnalyticsService
                     ? current.Value
                     : current.Value.IsMonotonicAfter(before) ? current.Value - before : current.Value;
                 baseline = current;
-                var at = ReadTimestamp(root) ?? File.GetLastWriteTimeUtc(file);
                 lastUsageAt = MostRecent(lastUsageAt, at);
                 if (delta.Total > 0)
                 {
@@ -426,7 +459,26 @@ public sealed class LocalUsageAnalyticsService
             }
             catch (JsonException) { malformedLineCount++; }
         }
-        return new ParseAggregateResult(buckets, timeline, modelTimeline, baseline, model, lastUsageAt, malformedLineCount);
+        return new ParseAggregateResult(buckets, timeline, modelTimeline, quotaTimeline, baseline, model, lastUsageAt, malformedLineCount);
+    }
+
+    private static bool TryReadWeeklyQuota(JsonElement payload, out double usedPercent)
+    {
+        usedPercent = 0;
+        if (!payload.TryGetProperty("rate_limits", out var limits) || limits.ValueKind != JsonValueKind.Object ||
+            !string.Equals(ReadString(limits, "limit_id"), "codex", StringComparison.OrdinalIgnoreCase) ||
+            !TryReadOfficialWeeklyWindow(limits, "primary", out usedPercent) &&
+            !TryReadOfficialWeeklyWindow(limits, "secondary", out usedPercent)) return false;
+        return true;
+    }
+
+    private static bool TryReadOfficialWeeklyWindow(JsonElement limits, string role, out double usedPercent)
+    {
+        usedPercent = 0;
+        return limits.TryGetProperty(role, out var window) && window.ValueKind == JsonValueKind.Object &&
+               window.TryGetProperty("used_percent", out var used) && used.ValueKind == JsonValueKind.Number && used.TryGetDouble(out usedPercent) &&
+               window.TryGetProperty("window_minutes", out var duration) && duration.ValueKind == JsonValueKind.Number && duration.TryGetInt32(out var minutes) && minutes >= OfficialCodexQuotaWindows.WeeklyMinimumMinutes &&
+               Net48Compatibility.IsFinite(usedPercent) && (usedPercent = Net48Compatibility.Clamp(usedPercent, 0, 100)) >= 0;
     }
 
     private static string? ReadString(JsonElement element, string name) => element.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.String ? value.GetString() : null;
@@ -439,8 +491,8 @@ public sealed class LocalUsageAnalyticsService
     private enum ParseKind { Partial, Rebuild, Append }
     private sealed record ParsePlan(FileDescriptor File, FileSignature Signature, CachedFile? Previous, ParseKind Kind, string FallbackModel);
     private sealed record ParsePlanResult(ParsePlan Plan, ParseAggregateResult? Parsed, Exception? Error);
-    private sealed record CachedFile(FileSignature Signature, bool IsFork, string FallbackModel, Dictionary<BucketKey, Aggregate> Buckets, Dictionary<TimelineKey, TimelineAggregate> Timeline, Dictionary<ModelTimelineKey, TimelineAggregate> ModelTimeline, Totals? LastTotals, string LastModel, DateTimeOffset? LastUsageAt, string PrefixMarker);
-    private sealed record ParseAggregateResult(Dictionary<BucketKey, Aggregate> Buckets, Dictionary<TimelineKey, TimelineAggregate> Timeline, Dictionary<ModelTimelineKey, TimelineAggregate> ModelTimeline, Totals? LastTotals, string LastModel, DateTimeOffset? LastUsageAt, int MalformedLineCount);
+    private sealed record CachedFile(FileSignature Signature, bool IsFork, string FallbackModel, Dictionary<BucketKey, Aggregate> Buckets, Dictionary<TimelineKey, TimelineAggregate> Timeline, Dictionary<ModelTimelineKey, TimelineAggregate> ModelTimeline, Dictionary<QuotaTimelineKey, TimedQuotaUsage> QuotaTimeline, Totals? LastTotals, string LastModel, DateTimeOffset? LastUsageAt, string PrefixMarker);
+    private sealed record ParseAggregateResult(Dictionary<BucketKey, Aggregate> Buckets, Dictionary<TimelineKey, TimelineAggregate> Timeline, Dictionary<ModelTimelineKey, TimelineAggregate> ModelTimeline, Dictionary<QuotaTimelineKey, TimedQuotaUsage> QuotaTimeline, Totals? LastTotals, string LastModel, DateTimeOffset? LastUsageAt, int MalformedLineCount);
     private readonly record struct FileSignature(long Length, long LastWriteUtcTicks)
     {
         public static FileSignature Create(string path)
@@ -508,6 +560,7 @@ public sealed class LocalUsageAnalyticsService
     private readonly record struct BucketKey(DateTime Day, string Model);
     private readonly record struct TimelineKey(DateTimeOffset At);
     private readonly record struct ModelTimelineKey(DateTimeOffset At, string Model, bool Priced);
+    private readonly record struct QuotaTimelineKey(DateTime Day);
     private readonly record struct TimelineAggregate(long Tokens, decimal CostUsd, TokenUsageBreakdown? Breakdown)
     {
         public static TimelineAggregate operator +(TimelineAggregate left, TimelineAggregate right) => new(left.Tokens + right.Tokens, left.CostUsd + right.CostUsd, (left.Breakdown ?? TokenUsageBreakdown.Zero) + (right.Breakdown ?? TokenUsageBreakdown.Zero));
@@ -540,6 +593,10 @@ public sealed class LocalUsageAnalyticsService
     private static void MergeModelTimeline(Dictionary<ModelTimelineKey, TimelineAggregate> destination, IReadOnlyDictionary<ModelTimelineKey, TimelineAggregate> source)
     {
         foreach (var pair in source) destination[pair.Key] = Net48Compatibility.GetValueOrDefault(destination, pair.Key) + pair.Value;
+    }
+    private static void MergeQuotaTimeline(Dictionary<QuotaTimelineKey, TimedQuotaUsage> destination, IReadOnlyDictionary<QuotaTimelineKey, TimedQuotaUsage> source)
+    {
+        foreach (var pair in source) if (!destination.TryGetValue(pair.Key, out var current) || pair.Value.At > current.At) destination[pair.Key] = pair.Value;
     }
 
     private static IEnumerable<LogicalFileCandidate> SelectNonOverlappingCandidates(IGrouping<string, LogicalFileCandidate> group)

@@ -24,6 +24,7 @@
     <BooleanToVisibilityConverter x:Key="BooleanToVisibility" />
     <local:CompactVisibilityConverter x:Key="CompactVisibility" />
     <local:CompactGaugeDiameterConverter x:Key="CompactGaugeDiameter" />
+    <local:CompactQuotaGaugeSizeConverter x:Key="CompactQuotaGaugeSize" />
 
     <Style x:Key="TokenUsageToolTip" TargetType="{x:Type ToolTip}">
       <Setter Property="Background" Value="Transparent" />

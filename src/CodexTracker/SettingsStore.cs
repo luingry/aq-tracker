@@ -4,7 +4,7 @@ using CodexTracker.Core;
 
 namespace CodexTracker;
 
-public sealed record AppSettings(double Left = 80, double Top = 80, double Width = 62, double Height = 52, bool IsExpanded = false, bool IsTopmost = true, string? CodexPath = null, decimal UsdBrl = 5.50m, string Theme = "Claro", string CurrencyCode = "BRL", WidgetModeSizes? ModeSizes = null, bool IsAgentListExpanded = false, string AccentColor = AccentPalette.DefaultBaseHex, string LanguageCode = LocalizationManager.DefaultLanguageCode, IReadOnlyList<CompletedAgentWork>? UnreadAgentWorks = null, DateTimeOffset? LastUpdateCheckUtc = null, string? DeferredUpdateVersion = null, DateTimeOffset? UpdateDeferredAtUtc = null);
+public sealed record AppSettings(double Left = 80, double Top = 80, double Width = 62, double Height = 52, bool IsExpanded = false, bool IsTopmost = true, string? CodexPath = null, decimal UsdBrl = 5.50m, string Theme = "Claro", string CurrencyCode = "BRL", WidgetModeSizes? ModeSizes = null, bool IsAgentListExpanded = false, string AccentColor = AccentPalette.DefaultBaseHex, string LanguageCode = LocalizationManager.DefaultLanguageCode, IReadOnlyList<CompletedAgentWork>? UnreadAgentWorks = null, DateTimeOffset? LastUpdateCheckUtc = null, string? DeferredUpdateVersion = null, DateTimeOffset? UpdateDeferredAtUtc = null, string CompactQuotaDisplay = "both");
 public sealed class SettingsStore
 {
     private readonly string _path;
@@ -17,6 +17,12 @@ public sealed class SettingsStore
     public AppSettings Load() { try { return Normalize(JsonSerializer.Deserialize<AppSettings>(File.ReadAllText(_path)) ?? new()); } catch { return Normalize(new()); } }
     public void Save(AppSettings settings) { Directory.CreateDirectory(Path.GetDirectoryName(_path)!); File.WriteAllText(_path, JsonSerializer.Serialize(Normalize(settings), new JsonSerializerOptions { WriteIndented = true })); }
     public static string NormalizeCurrency(string? currencyCode) => CurrencyPresentation.Normalize(currencyCode);
+    public static string NormalizeCompactQuotaDisplay(string? value) => value?.Trim().ToLowerInvariant() switch
+    {
+        "5h" => "5h",
+        "7d" => "7d",
+        _ => "both"
+    };
     public static AppSettings Normalize(AppSettings settings)
     {
         var slots = WidgetSizePolicy.NormalizeSlots(settings.ModeSizes, settings.IsExpanded, new(settings.Width, settings.Height));
@@ -26,6 +32,7 @@ public sealed class SettingsStore
             CurrencyCode = CurrencyPresentation.Normalize(settings.CurrencyCode),
             AccentColor = AccentPalette.Normalize(settings.AccentColor),
             LanguageCode = LocalizationManager.NormalizeLanguage(settings.LanguageCode),
+            CompactQuotaDisplay = NormalizeCompactQuotaDisplay(settings.CompactQuotaDisplay),
             DeferredUpdateVersion = NormalizeDeferredUpdateVersion(settings.DeferredUpdateVersion),
             UnreadAgentWorks = (settings.UnreadAgentWorks ?? [])
                 .Where(item => !string.IsNullOrWhiteSpace(item.CompletionId) && !string.IsNullOrWhiteSpace(item.ThreadId))

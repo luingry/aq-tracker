@@ -1,5 +1,19 @@
 # Erros e solucoes conhecidas
 
+## Quota semanal assumia sempre o slot primary
+
+- **Sintoma:** contas em que o limite de 5h ocupava `primary` e o semanal ocupava `secondary` mostravam o indicador semanal ausente ou registravam o limite errado no histórico diário.
+- **Causa:** a seleção procurava apenas `codex:primary`, em vez de identificar o bucket oficial `codex` pela duração da janela.
+- **Solução:** os indicadores e o extrator histórico agora escolhem 5h e 7d por duração nos slots `primary` ou `secondary` do bucket oficial; buckets de famílias de modelos continuam excluídos.
+- **Prevenção:** mantenha fixtures com slots invertidos, bucket `codex` somente em `rateLimitsByLimitId`, e bucket de família contendo as duas janelas.
+
+## Testes de analytics dependiam do relogio real
+
+- **Sintoma:** fixtures de agosto deixavam de validar totais mensais quando executadas em outro mês.
+- **Causa:** alguns construtores de `LocalUsageAnalyticsService` nos testes usavam o relógio padrão, embora os JSONL de fixture usassem `analyticsNow` fixo.
+- **Solução:** as fixtures temporais agora injetam o mesmo relógio fixo.
+- **Prevenção:** qualquer teste que agrupe uso por dia ou mês deve controlar o relógio e os timestamps de fixture.
+
 ## Conclusão de agent era removida sem confirmação de leitura no Codex
 
 - **Sintoma:** ao concluir um chat já aberto no Codex, a lista do Tracker podia remover sua conclusão não lida quando a janela do Codex estava em segundo plano ou minimizada. A regra introduzida na 0.18.12 ainda era ampla: ao voltar o Codex para primeiro plano, ela também removia a conclusão de um chat não selecionado.
