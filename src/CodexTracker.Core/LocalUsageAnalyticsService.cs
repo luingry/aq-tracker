@@ -18,7 +18,7 @@ public sealed record TokenUsageBreakdown(long CachedReadTokens, long InputTokens
 
 public sealed record ModelUsage(string Model, long Tokens, decimal CostUsd, bool Priced, TokenUsageBreakdown? Breakdown = null);
 public sealed record DailyTokenUsage(DateTime Day, long Tokens, decimal UsdCost = 0, decimal BrlCost = 0, TokenUsageBreakdown? Breakdown = null);
-public sealed record DailyQuotaUsage(DateTime Day, double? UsedPercent);
+public sealed record DailyQuotaUsage(DateTime Day, double? UsedPercent, double? InitialUsedPercent = null);
 public sealed record TimedQuotaUsage(DateTimeOffset At, double UsedPercent);
 public sealed record TimedTokenUsage(DateTimeOffset At, long Tokens, decimal CostUsd = 0, TokenUsageBreakdown? Breakdown = null);
 public sealed record TimedModelUsage(DateTimeOffset At, string Model, long Tokens, decimal CostUsd = 0, bool Priced = false, TokenUsageBreakdown? Breakdown = null);

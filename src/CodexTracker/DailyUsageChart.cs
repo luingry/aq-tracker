@@ -30,6 +30,9 @@ public sealed class DailyUsageChart : FrameworkElement
     public static readonly DependencyProperty QuotaBrushProperty = DependencyProperty.Register(
         nameof(QuotaBrush), typeof(MediaBrush), typeof(DailyUsageChart),
         new FrameworkPropertyMetadata(MediaBrushes.Black, FrameworkPropertyMetadataOptions.AffectsRender));
+    public static readonly DependencyProperty InitialQuotaBrushProperty = DependencyProperty.Register(
+        nameof(InitialQuotaBrush), typeof(MediaBrush), typeof(DailyUsageChart),
+        new FrameworkPropertyMetadata(MediaBrushes.SeaGreen, FrameworkPropertyMetadataOptions.AffectsRender));
     public static readonly DependencyProperty BarBrushProperty = DependencyProperty.Register(
         nameof(BarBrush), typeof(MediaBrush), typeof(DailyUsageChart),
         new FrameworkPropertyMetadata(MediaBrushes.SeaGreen, FrameworkPropertyMetadataOptions.AffectsRender));
@@ -52,6 +55,7 @@ public sealed class DailyUsageChart : FrameworkElement
     public IEnumerable? Series { get => (IEnumerable?)GetValue(SeriesProperty); set => SetValue(SeriesProperty, value); }
     public IEnumerable? QuotaSeries { get => (IEnumerable?)GetValue(QuotaSeriesProperty); set => SetValue(QuotaSeriesProperty, value); }
     public MediaBrush QuotaBrush { get => (MediaBrush)GetValue(QuotaBrushProperty); set => SetValue(QuotaBrushProperty, value); }
+    public MediaBrush InitialQuotaBrush { get => (MediaBrush)GetValue(InitialQuotaBrushProperty); set => SetValue(InitialQuotaBrushProperty, value); }
     public MediaBrush BarBrush { get => (MediaBrush)GetValue(BarBrushProperty); set => SetValue(BarBrushProperty, value); }
     public MediaBrush TrackBrush { get => (MediaBrush)GetValue(TrackBrushProperty); set => SetValue(TrackBrushProperty, value); }
     public MediaBrush LabelBrush { get => (MediaBrush)GetValue(LabelBrushProperty); set => SetValue(LabelBrushProperty, value); }
@@ -83,6 +87,10 @@ public sealed class DailyUsageChart : FrameworkElement
         var gap = 1.5;
         var plotWidth = Math.Max(1, ActualWidth - axisWidth);
         var width = Math.Max(1.5, (plotWidth - gap * (days - 1)) / days);
+        var quotaPoints = quota.Select((value, index) => QuotaCurve.RemainingPercent(value.UsedPercent) is { } percent
+            ? new WpfPoint(axisWidth + index * (width + gap) + width / 2, chartTop + chartHeight - chartHeight * percent / 100d) : (WpfPoint?)null).ToArray();
+        var initialPoints = quota.Select((value, index) => QuotaCurve.RemainingPercent(value.InitialUsedPercent) is { } percent
+            ? new WpfPoint(axisWidth + index * (width + gap) + width / 2, chartTop + chartHeight - chartHeight * percent / 100d) : (WpfPoint?)null).ToArray();
         var baseline = new MediaPen(TrackBrush, 1);
         drawingContext.DrawLine(baseline, new WpfPoint(axisWidth, chartTop + chartHeight - .5), new WpfPoint(ActualWidth, chartTop + chartHeight - .5));
         drawingContext.DrawLine(baseline, new WpfPoint(axisWidth - .5, chartTop), new WpfPoint(axisWidth - .5, chartTop + chartHeight));
@@ -92,6 +100,16 @@ public sealed class DailyUsageChart : FrameworkElement
             var tickText = CreateText(tick.ToString(CultureInfo.InvariantCulture) + "%", new Typeface(new System.Windows.Media.FontFamily("./assets/fonts/#Source Sans 3"), FontStyles.Normal, FontWeights.Normal, FontStretches.Normal));
             drawingContext.DrawLine(baseline, new WpfPoint(axisWidth - 3, y), new WpfPoint(axisWidth, y));
             drawingContext.DrawText(tickText, new WpfPoint(Math.Max(0, axisWidth - tickText.Width - 4), y - tickText.Height / 2));
+        }
+        var remainingPath = QuotaCurve.CreatePath(quotaPoints, width);
+        var initialPath = QuotaCurve.CreatePath(initialPoints, width);
+        var remainingUnder = QuotaCurve.CreateUnderArea(remainingPath, chartTop + chartHeight);
+        var initialUnder = QuotaCurve.CreateUnderArea(initialPath, chartTop + chartHeight);
+        if (initialUnder is not null) drawingContext.DrawGeometry(WithOpacity(InitialQuotaBrush, .06), null, initialUnder);
+        if (initialUnder is not null && remainingUnder is not null)
+        {
+            var common = new Rect(Math.Max(initialUnder.Bounds.Left, remainingUnder.Bounds.Left), chartTop, Math.Max(0, Math.Min(initialUnder.Bounds.Right, remainingUnder.Bounds.Right) - Math.Max(initialUnder.Bounds.Left, remainingUnder.Bounds.Left)), chartHeight);
+            if (common.Width > 0) drawingContext.DrawGeometry(WithOpacity(InitialQuotaBrush, .14), null, Geometry.Combine(Geometry.Combine(initialUnder, remainingUnder, GeometryCombineMode.Xor, null), new RectangleGeometry(common), GeometryCombineMode.Intersect, null));
         }
 
         _barHits.Clear();
@@ -103,34 +121,17 @@ public sealed class DailyUsageChart : FrameworkElement
             var brush = value.Tokens > 0 ? BarBrush : TrackBrush;
             var barRect = new Rect(x, chartTop + chartHeight - height, width, height);
             drawingContext.DrawRoundedRectangle(brush, null, barRect, 1.5, 1.5);
-            _barHits.Add(new(new Rect(x, chartTop, Math.Max(width, width + gap), chartHeight), value, index < quota.Count ? quota[index].UsedPercent : null));
+            _barHits.Add(new(new Rect(x, chartTop, Math.Max(width, width + gap), chartHeight), value, index < quota.Count ? QuotaCurve.RemainingPercent(quota[index].UsedPercent) : null, index < quota.Count ? QuotaCurve.RemainingPercent(quota[index].InitialUsedPercent) : null));
         }
 
-        var quotaPoints = quota.Select((value, index) => value.UsedPercent is { } percent
-            ? new WpfPoint(axisWidth + index * (width + gap) + width / 2, chartTop + chartHeight - chartHeight * percent / 100d) : (WpfPoint?)null).ToArray();
-        foreach (var segment in QuotaCurve.Segments(quotaPoints))
-        {
-            var geometry = new StreamGeometry();
-            using (var context = geometry.Open())
-            {
-                context.BeginFigure(segment[0], false, false);
-                for (var index = 1; index < segment.Count; index++)
-                {
-                    var previous = segment[index - 1]; var current = segment[index];
-                    var before = index > 1 ? segment[index - 2] : previous;
-                    var after = index + 1 < segment.Count ? segment[index + 1] : current;
-                    var minY = Math.Min(previous.Y, current.Y); var maxY = Math.Max(previous.Y, current.Y);
-                    var slopeStart = (current.Y - before.Y) / Math.Max(1, current.X - before.X);
-                    var slopeEnd = (after.Y - previous.Y) / Math.Max(1, after.X - previous.X);
-                    var first = new WpfPoint(previous.X + (current.X - previous.X) / 3, Math.Max(minY, Math.Min(maxY, previous.Y + slopeStart * (current.X - previous.X) / 3)));
-                    var second = new WpfPoint(current.X - (current.X - previous.X) / 3, Math.Max(minY, Math.Min(maxY, current.Y - slopeEnd * (current.X - previous.X) / 3)));
-                    context.BezierTo(first, second, current, true, false);
-                }
-            }
-            drawingContext.DrawGeometry(null, new MediaPen(QuotaBrush, 1.5), geometry);
-        }
+        if (remainingPath is not null) drawingContext.DrawGeometry(null, new MediaPen(QuotaBrush, 1.5), remainingPath);
         foreach (var point in quotaPoints.Where(point => point.HasValue).Select(point => point!.Value))
             drawingContext.DrawEllipse(QuotaBrush, null, point, 2, 2);
+        if (initialPath is not null)
+        {
+            drawingContext.DrawGeometry(null, new MediaPen(WithOpacity(TrackBrush, .9), 2.7) { DashStyle = DashStyles.Dash }, initialPath);
+            drawingContext.DrawGeometry(null, new MediaPen(InitialQuotaBrush, 1.25) { DashStyle = DashStyles.Dash }, initialPath);
+        }
 
         var typeface = new Typeface(new System.Windows.Media.FontFamily("./assets/fonts/#Source Sans 3"), FontStyles.Normal, FontWeights.Normal, FontStretches.Normal);
         DrawLabel(drawingContext, "1", axisWidth, chartTop + chartHeight + 2, typeface);
@@ -174,8 +175,8 @@ public sealed class DailyUsageChart : FrameworkElement
         foreach (var item in QuotaSeries)
         {
             var type = item?.GetType(); var date = type?.GetProperty("Day")?.GetValue(item) as DateTime?;
-            var raw = type?.GetProperty("UsedPercent")?.GetValue(item);
-            result.Add(new(date?.Day ?? day++, TryNumber(raw, out var value) ? Net48Compatibility.Clamp(value, 0, 100) : null));
+            var raw = type?.GetProperty("UsedPercent")?.GetValue(item); var initial = type?.GetProperty("InitialUsedPercent")?.GetValue(item);
+            result.Add(new(date?.Day ?? day++, TryNumber(raw, out var value) ? Net48Compatibility.Clamp(value, 0, 100) : null, TryNumber(initial, out var start) ? Net48Compatibility.Clamp(start, 0, 100) : null));
         }
         return result;
     }
@@ -194,7 +195,9 @@ public sealed class DailyUsageChart : FrameworkElement
     private void ShowTooltip(BarHit hit)
     {
         var exchangeRate = hit.Point.UsdCost > 0 ? hit.Point.BrlCost / hit.Point.UsdCost : 0;
-        var title = LocalizationManager.Format("DayNumber", hit.Point.Day) + " · " + (hit.UsedPercent is { } used ? LocalizationManager.Text("WeeklyQuota") + " " + used.ToString("0.#", CultureInfo.CurrentUICulture) + "%" : LocalizationManager.Text("NoQuotaRecord"));
+        var detail = hit.RemainingPercent is { } remaining ? LocalizationManager.Text("WeeklyQuotaRemainingShort") + " " + remaining.ToString("0.#", CultureInfo.CurrentUICulture) + "%" : LocalizationManager.Text("NoQuotaRecord");
+        if (hit.InitialRemainingPercent is { } initial) detail += " · " + LocalizationManager.Text("WeeklyQuotaInitial") + " " + initial.ToString("0.#", CultureInfo.CurrentUICulture) + "%";
+        var title = LocalizationManager.Format("DayNumber", hit.Point.Day) + " · " + detail;
         _tooltip.Content = TokenUsageTooltip.Create(title, hit.Point.Breakdown, true, exchangeRate, CurrencyCode);
         _tooltip.IsOpen = true;
     }
@@ -204,6 +207,8 @@ public sealed class DailyUsageChart : FrameworkElement
         try { number = value is null ? 0 : Convert.ToDouble(value, CultureInfo.InvariantCulture); return value is not null; }
         catch (Exception error) when (error is FormatException or InvalidCastException or OverflowException) { number = 0; return false; }
     }
+
+    private static MediaBrush WithOpacity(MediaBrush brush, double opacity) { var copy = brush.Clone(); copy.Opacity = opacity; copy.Freeze(); return copy; }
 
     private static bool TryDecimal(object? value, out decimal number)
     {
@@ -221,21 +226,52 @@ public sealed class DailyUsageChart : FrameworkElement
     {
         public static DailyPoint Zero(int day) => new(day, 0, 0, 0, TokenUsageBreakdown.Zero);
     }
-    private sealed record DailyQuotaPoint(int Day, double? UsedPercent);
-    private sealed record BarHit(Rect Bounds, DailyPoint Point, double? UsedPercent);
+    private sealed record DailyQuotaPoint(int Day, double? UsedPercent, double? InitialUsedPercent);
+    private sealed record BarHit(Rect Bounds, DailyPoint Point, double? RemainingPercent, double? InitialRemainingPercent);
 }
 
 public static class QuotaCurve
 {
-    // Consecutive points only: the short Catmull-Rom-like tangent is clamped to retain monotonic bounds.
+    public static double? RemainingPercent(double? usedPercent) => usedPercent is { } used
+        ? Net48Compatibility.Clamp(100 - used, 0, 100)
+        : null;
+
+    // Unknown days are skipped, preserving original X distance between known daily readings.
     public static IEnumerable<IReadOnlyList<WpfPoint>> Segments(IEnumerable<WpfPoint?> points)
     {
         var segment = new List<WpfPoint>();
         foreach (var point in points)
         {
             if (point is { } value) segment.Add(value);
-            else { if (segment.Count > 1) yield return segment.ToArray(); segment.Clear(); }
         }
         if (segment.Count > 1) yield return segment.ToArray();
+    }
+
+    public static PathGeometry? CreatePath(IEnumerable<WpfPoint?> source, double singlePointWidth)
+    {
+        var points = source.Where(point => point.HasValue).Select(point => point!.Value).ToList();
+        if (points.Count == 0) return null;
+        if (points.Count == 1) { var point = points[0]; points = [new WpfPoint(point.X - singlePointWidth * .35, point.Y), new WpfPoint(point.X + singlePointWidth * .35, point.Y)]; }
+        var figure = new PathFigure { StartPoint = points[0], IsClosed = false, IsFilled = false };
+        for (var index = 1; index < points.Count; index++)
+        {
+            var previous = points[index - 1]; var current = points[index]; var before = index > 1 ? points[index - 2] : previous; var after = index + 1 < points.Count ? points[index + 1] : current;
+            var minY = Math.Min(previous.Y, current.Y); var maxY = Math.Max(previous.Y, current.Y); var span = current.X - previous.X;
+            var slopeStart = (current.Y - before.Y) / Math.Max(1, current.X - before.X); var slopeEnd = (after.Y - previous.Y) / Math.Max(1, after.X - previous.X);
+            var first = new WpfPoint(previous.X + span / 3, Math.Max(minY, Math.Min(maxY, previous.Y + slopeStart * span / 3)));
+            var second = new WpfPoint(current.X - span / 3, Math.Max(minY, Math.Min(maxY, current.Y - slopeEnd * span / 3)));
+            figure.Segments.Add(new BezierSegment(first, second, current, true));
+        }
+        return new PathGeometry([figure]);
+    }
+
+    public static Geometry? CreateUnderArea(PathGeometry? path, double baseline)
+    {
+        if (path?.Figures.Count != 1 || path.Figures[0].Segments.Count == 0) return null;
+        var source = path.Figures[0]; var figure = source.Clone(); figure.IsClosed = true; figure.IsFilled = true;
+        var end = source.Segments.OfType<BezierSegment>().Last().Point3;
+        figure.Segments.Add(new LineSegment(new WpfPoint(end.X, baseline), true));
+        figure.Segments.Add(new LineSegment(new WpfPoint(source.StartPoint.X, baseline), true));
+        return new PathGeometry([figure]);
     }
 }

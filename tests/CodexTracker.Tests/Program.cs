@@ -108,11 +108,32 @@ var dailyQuota = DailyQuotaSeries.CloseByLocalDay([
     new(new DateTimeOffset(2026, 8, 12, 12, 0, 0, TimeSpan.Zero), 40)
 ], new DateTime(2026, 8, 1), quotaSeriesNow, 55);
 Assert(dailyQuota.Single(x => x.Day.Day == 10).UsedPercent == 12 && dailyQuota.Single(x => x.Day.Day == 11).UsedPercent is null && dailyQuota.Single(x => x.Day.Day == 12).UsedPercent == 55 && dailyQuota.Single(x => x.Day.Day == 13).UsedPercent is null, "daily quota closes each local day chronologically, preserves missing days, uses live today, and never forecasts future days");
+Assert(QuotaCurve.RemainingPercent(0) == 100 && QuotaCurve.RemainingPercent(100) == 0 && QuotaCurve.RemainingPercent(25) == 75 && QuotaCurve.RemainingPercent(null) is null, "daily chart converts used quota to remaining quota once while preserving unknown readings");
+var quotaCurvePoints = QuotaCurve.Segments([
+    new System.Windows.Point(2, 90), null, new System.Windows.Point(14, 50), null, new System.Windows.Point(23, 75)
+]).Single();
+Assert(quotaCurvePoints.Count == 3 && quotaCurvePoints[1].X == 14 && quotaCurvePoints[2].X == 23, "quota curve connects known readings across unknown days without compacting their calendar X positions or projecting endpoints");
 var quotaStorePath = Path.Combine(Path.GetTempPath(), "codex-tracker-quota-store-" + Guid.NewGuid() + ".json");
 var quotaStore = new QuotaSnapshotStore(quotaStorePath);
 _ = quotaStore.Append(quotaSeriesNow, 44);
 Assert(new QuotaSnapshotStore(quotaStorePath).Read().Single() == new TimedQuotaUsage(quotaSeriesNow, 44), "official live quota readings persist independently of raw rollouts");
+var initialQuotaNow = new DateTimeOffset(2026, 8, 12, 10, 0, 0, TimeSpan.FromHours(-3));
+var initialStore = new QuotaSnapshotStore(persistent: false);
+Assert(initialStore.CaptureInitial(initialQuotaNow, 25, initialQuotaNow).Single().UsedPercent == 25 && initialStore.CaptureInitial(initialQuotaNow.AddHours(2), 60, initialQuotaNow.AddHours(2)).Single().UsedPercent == 25, "initial quota captures the first observed valid weekly reading and never replaces it later that day");
+Assert(initialStore.CaptureInitial(initialQuotaNow.AddDays(1), 40, initialQuotaNow.AddDays(1)).Count == 2 && initialStore.ReadInitial().Single(x => x.At.LocalDateTime.Date == initialQuotaNow.AddDays(1).LocalDateTime.Date).UsedPercent == 40, "initial quota starts a new opening reading automatically on the next local day");
+Assert(initialStore.CaptureInitial(initialQuotaNow.AddDays(-1), 80, initialQuotaNow).Count == 2, "stale official snapshots never create an initial quota reading for the current day");
+var legacyStore = new QuotaSnapshotStore(quotaStorePath);
+Assert(legacyStore.ReadInitial().Count == 0, "legacy last-only quota history is never relabeled as historical opening quota");
+var persistentInitialStore = new QuotaSnapshotStore(quotaStorePath);
+_ = persistentInitialStore.CaptureInitial(initialQuotaNow, 25, initialQuotaNow);
+var restartedInitialStore = new QuotaSnapshotStore(quotaStorePath);
+var restartedInitial = restartedInitialStore.CaptureInitial(initialQuotaNow.AddHours(3), 70, initialQuotaNow.AddHours(3)).Single();
+Assert(restartedInitial == new TimedQuotaUsage(initialQuotaNow, 25), "initial quota survives restart and never replaces the first observed same-day value after a reset or lower remaining quota");
+var independentQuotaPath = Path.Combine(Path.GetTempPath(), "codex-tracker-quota-store-independent-" + Guid.NewGuid() + ".json");
+Assert(new QuotaSnapshotStore(independentQuotaPath).ReadInitial().Count == 0, "custom quota stores in the same temporary directory retain independent initial-history files");
 File.Delete(quotaStorePath);
+var initialQuotaStorePath = Path.ChangeExtension(quotaStorePath, "initial.json"); if (File.Exists(initialQuotaStorePath)) File.Delete(initialQuotaStorePath);
+var independentInitialQuotaStorePath = Path.ChangeExtension(independentQuotaPath, "initial.json"); if (File.Exists(independentInitialQuotaStorePath)) File.Delete(independentInitialQuotaStorePath);
 var quotaRolloutRoot = Path.Combine(Path.GetTempPath(), "codex-tracker-quota-rollout-" + Guid.NewGuid());
 Directory.CreateDirectory(quotaRolloutRoot);
 var quotaRolloutPath = Path.Combine(quotaRolloutRoot, "quota.jsonl");

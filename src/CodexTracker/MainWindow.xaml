@@ -335,8 +335,15 @@
                                      CurrencyCode="{Binding CurrencyCode}"
                                      BarBrush="{DynamicResource Accent}" TrackBrush="{DynamicResource GaugeTrack}"
                                      QuotaBrush="{DynamicResource Ink}"
+                                     InitialQuotaBrush="{DynamicResource Accent}"
                                      LabelBrush="{DynamicResource SoftInk}" TooltipSurface="{DynamicResource InputSurface}"
                                      TooltipTextBrush="{DynamicResource Ink}" />
+              <StackPanel Orientation="Horizontal" Margin="23,3,0,0" Height="14">
+                <Line X1="0" X2="12" Y1="1" Y2="1" Stroke="{DynamicResource Accent}" StrokeThickness="1.25" StrokeDashArray="3,2" VerticalAlignment="Center" Margin="0,0,4,0" />
+                <TextBlock Text="{DynamicResource Loc.WeeklyQuotaInitial}" FontFamily="./assets/fonts/#Source Sans 3" FontSize="8" Foreground="{DynamicResource SoftInk}" Margin="0,0,10,0" />
+                <Rectangle Width="12" Height="2" Fill="{DynamicResource Ink}" VerticalAlignment="Center" Margin="0,0,4,0" />
+                <TextBlock Text="{DynamicResource Loc.WeeklyQuotaRemainingShort}" FontFamily="./assets/fonts/#Source Sans 3" FontSize="8" Foreground="{DynamicResource SoftInk}" />
+              </StackPanel>
               <Button Click="OpenChatDetails" Content="{DynamicResource Loc.DetailsByChat}" HorizontalAlignment="Left" Padding="8,4" Margin="0,7,0,0"
                       FontSize="10" FontWeight="SemiBold" Foreground="{DynamicResource Ink}" Background="{DynamicResource InputSurface}" />
             </StackPanel>

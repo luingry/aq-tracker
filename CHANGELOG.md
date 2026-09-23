@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.21.0] - 2026-09-08
+
+### Added
+
+- Added a persisted daily opening 7-day quota series, with a dashed initial line, translucent initial and between-series areas, and daily quota history tooltip details.
+
+## [0.20.1] - 2026-09-08
+
+### Fixed
+
+- Daily quota history now plots and labels weekly quota remaining. Known readings continue across days without a quota snapshot while preserving their actual calendar spacing.
+
 ## [0.20.0] - 2026-09-05
 
 ### Added

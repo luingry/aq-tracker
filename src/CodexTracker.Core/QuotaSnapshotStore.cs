@@ -6,9 +6,11 @@ namespace CodexTracker.Core;
 public sealed class QuotaSnapshotStore
 {
     private readonly string _path;
+    private readonly string _initialPath;
     private readonly bool _persistent;
     private readonly List<TimedQuotaUsage> _memory = [];
-    public QuotaSnapshotStore(string? path = null, bool persistent = true) { _persistent = persistent; _path = path ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "CodexTracker", "quota-history.json"); }
+    private readonly List<TimedQuotaUsage> _initialMemory = [];
+    public QuotaSnapshotStore(string? path = null, bool persistent = true) { _persistent = persistent; _path = path ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "CodexTracker", "quota-history.json"); _initialPath = Path.ChangeExtension(_path, "initial.json"); }
 
     public IReadOnlyList<TimedQuotaUsage> Read()
     {
@@ -40,6 +42,29 @@ public sealed class QuotaSnapshotStore
         }
         catch (Exception error) when (error is IOException or UnauthorizedAccessException) { }
         return values;
+    }
+
+    public IReadOnlyList<TimedQuotaUsage> ReadInitial() => Read(_initialPath, _initialMemory);
+
+    /// <summary>Records only the first observed valid weekly snapshot on the actual local day.</summary>
+    public IReadOnlyList<TimedQuotaUsage> CaptureInitial(DateTimeOffset at, double usedPercent, DateTimeOffset now)
+    {
+        var current = ReadInitial();
+        if (!Net48Compatibility.IsFinite(usedPercent) || at > now || at.LocalDateTime.Date != now.LocalDateTime.Date || current.Any(x => x.At.LocalDateTime.Date == now.LocalDateTime.Date)) return current;
+        var values = current.Append(new TimedQuotaUsage(at, Net48Compatibility.Clamp(usedPercent, 0, 100))).Where(x => x.At >= now.AddDays(-62)).OrderBy(x => x.At).ToArray();
+        Write(_initialPath, _initialMemory, values); return values;
+    }
+
+    private IReadOnlyList<TimedQuotaUsage> Read(string path, List<TimedQuotaUsage> memory)
+    {
+        try { if (!_persistent) return memory.ToArray(); if (!File.Exists(path)) return []; return JsonSerializer.Deserialize<List<TimedQuotaUsage>>(File.ReadAllText(path))?.Where(x => x is not null).Where(IsValid).GroupBy(x => x.At.LocalDateTime.Date).Select(group => group.OrderBy(x => x.At).First()).OrderBy(x => x.At).ToArray() ?? []; }
+        catch (Exception error) when (error is IOException or JsonException or UnauthorizedAccessException) { return []; }
+    }
+
+    private void Write(string path, List<TimedQuotaUsage> memory, IReadOnlyList<TimedQuotaUsage> values)
+    {
+        if (!_persistent) { memory.Clear(); memory.AddRange(values); return; }
+        try { Directory.CreateDirectory(Path.GetDirectoryName(path)!); var temporary = path + ".tmp"; File.WriteAllText(temporary, JsonSerializer.Serialize(values)); if (File.Exists(path)) File.Replace(temporary, path, null); else File.Move(temporary, path); } catch (Exception error) when (error is IOException or UnauthorizedAccessException) { }
     }
 
     private static bool IsValid(TimedQuotaUsage value) => value.At != default && Net48Compatibility.IsFinite(value.UsedPercent);

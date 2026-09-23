@@ -460,8 +460,11 @@ public sealed class MainViewModel : INotifyPropertyChanged
     {
         var now = _clock();
         var official = weekly is null ? _quotaSnapshotStore.Read() : _quotaSnapshotStore.Append(receivedAt, weekly.UsedPercent);
+        var initials = weekly is null ? _quotaSnapshotStore.ReadInitial() : _quotaSnapshotStore.CaptureInitial(receivedAt, weekly.UsedPercent, now);
         var history = (_lastAnalytics?.QuotaTimeline ?? []).Concat(official).GroupBy(x => x.At).Select(group => group.Last());
-        DailyQuotaSeries = CodexTracker.Core.DailyQuotaSeries.CloseByLocalDay(history, now.LocalDateTime.Date, now);
+        var initialByDay = initials.Where(x => x.At <= now && x.At.LocalDateTime.Date <= now.LocalDateTime.Date).ToDictionary(x => x.At.LocalDateTime.Date, x => x.UsedPercent);
+        DailyQuotaSeries = CodexTracker.Core.DailyQuotaSeries.CloseByLocalDay(history, now.LocalDateTime.Date, now)
+            .Select(day => day with { InitialUsedPercent = initialByDay.TryGetValue(day.Day, out var initial) ? initial : null }).ToArray();
         PropertyChanged?.Invoke(this, new(nameof(DailyQuotaSeries)));
     }
 
