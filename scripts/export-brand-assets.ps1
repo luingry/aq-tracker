@@ -61,7 +61,7 @@ function New-AppIconBitmap([int]$size) {
 
 $pngPaths = @()
 foreach ($size in $sizes) {
-    $output = Join-Path $pngRoot "codex-tracker-$size.png"
+    $output = Join-Path $pngRoot "aq-tracker-$size.png"
     $bitmap = New-AppIconBitmap $size
     $bitmap.Save($output, [System.Drawing.Imaging.ImageFormat]::Png)
     $bitmap.Dispose()
@@ -76,7 +76,7 @@ foreach ($pngPath in $pngPaths) {
     # PowerShell pipeline flatten every PNG into individual bytes.
     $images += ,([System.IO.File]::ReadAllBytes($pngPath))
 }
-$icoPath = Join-Path $brandRoot "codex-tracker.ico"
+$icoPath = Join-Path $brandRoot "aq-tracker.ico"
 $stream = [System.IO.File]::Create($icoPath)
 $writer = [System.IO.BinaryWriter]::new($stream)
 $writer.Write([uint16]0)

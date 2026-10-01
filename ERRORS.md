@@ -1,5 +1,26 @@
 # Erros e solucoes conhecidas
 
+## Callback do layout detalhado executava sem PresentationSource
+
+- **Sintoma:** a suíte WPF encerrava com `InvalidOperationException: Este Visual não está conectado a um PresentationSource`, em `GetResizeWorkArea`, durante a atualização de layout de uma janela desconectada.
+- **Causa:** `LayoutUpdated` pode disparar após o fechamento/desconexão da janela; o callback detalhado chamava `PointToScreen` sem verificar se ainda existia uma fonte de apresentação.
+- **Solução:** o callback só calcula a área de trabalho quando a janela está no modo detalhado e `PresentationSource.FromVisual(this)` existe.
+- **Prevenção:** callbacks de layout que dependem de coordenadas de tela precisam validar a conexão do visual; exercitar a abertura, atualização e fechamento de janelas reais no smoke WPF.
+
+## Plataformas simultâneas misturavam agentes e ocultavam janelas de cota
+
+- **Sintoma:** agentes Codex e Claude apareciam sob o mesmo separador de projeto; ao ativar ambos, a cota semanal do Claude desaparecia apesar da seleção 5h + 7d.
+- **Causa:** o agrupamento usava somente o caminho do projeto. A política de cotas substituía as janelas selecionadas por uma única janela mais restritiva por provedor, e o XAML e a geometria comportavam somente dois círculos.
+- **Solução:** agrupar primeiro por plataforma e usar sempre seu nome no separador existente, inclusive com um único agente ou conclusão não lida. A primeira correção mantinha o nome do projeto quando havia uma só plataforma, mas o marcador deve identificar a plataforma em todos os casos. Materializar todos os indicadores selecionados por plataforma num ItemsControl horizontal; dimensionar cada círculo, o widget e as regiões de resize pela quantidade real, preservando a escala salva.
+- **Prevenção:** testar um único agente Codex, um único Claude, uma conclusão isolada e trabalho entre plataformas com projetos iguais e diferentes, além das transições para uma plataforma e cenários com três e quatro cotas. Validar os retângulos WPF em escala mínima, intermediária e máxima, incluindo espaçamento e limites do widget.
+
+## Clique em sessão Claude abria somente a janela geral
+
+- **Sintoma:** clicar numa linha Claude trazia o aplicativo para frente sem selecionar o chat correspondente.
+- **Causa:** o leitor ignorava `hostSessionId` da inscrição local; a atividade, a conclusão persistida e a linha não transportavam a identidade desktop necessária à rota de continuação.
+- **Solução:** preservar o id validado em toda a cadeia e abrir `claude://code/continue?session=<id>&source=url_external` pelo shell. Ausência, valor inválido ou falha de abertura mantêm o fallback de foco da janela e a marcação explícita como lido.
+- **Prevenção:** validar a string original sem `Trim()`, permitir somente `local_[A-Za-z0-9-]{1,64}` com correspondência integral e manter testes de injeção, limites de tamanho, conclusão e JSON persistido antigo sem o campo.
+
 ## Callback OAuth indisponível em ambiente com HttpListener não suportado
 
 - **Sintoma:** um smoke adicional do callback real retornou `PlatformNotSupportedException` no construtor de `HttpListener`; a consulta do framework confirmou `HttpListener.IsSupported=false` neste ambiente, apesar do serviço HTTP do Windows estar em execução.
@@ -200,9 +221,9 @@
 
 ## Build Release falha porque o executável está em uso
 
-- **Sintoma:** `MSB3027`/`MSB3021` ao copiar `apphost.exe` para `CodexTracker.exe` após várias tentativas.
+- **Sintoma:** `MSB3027`/`MSB3021` ao copiar `apphost.exe` para `AqTracker.exe` após várias tentativas.
 - **Causa:** uma instância da própria build Release permaneceu aberta durante o smoke visual e manteve o executável bloqueado.
-- **Solução:** encerrar somente a instância de teste identificada pelo caminho `src\CodexTracker\bin\Release` e repetir o build.
+- **Solução:** encerrar somente a instância de teste identificada pelo caminho `src\AqTracker\bin\Release` e repetir o build.
 - **Prevenção:** finalizar o smoke local antes de recompilar ou gerar o instalador; não encerrar a instalação do usuário por nome de processo sem conferir o caminho.
 
 ## Tokens locais divergiam do total processado do Codex
@@ -231,7 +252,7 @@
 - **Sintoma:** a descoberta pelo `PATH` pode encontrar um alias em `WindowsApps` que nao e executavel por processos externos.
 - **Causa:** App Execution Alias do Windows, em vez do binario real do Codex CLI.
 - **Solucao:** o aplicativo tenta `where codex`, caminhos de instalacao conhecidos e um caminho configurado pelo usuario. Neste host, o binario funcional esta em `C:\Users\luing\.codex\plugins\.plugin-appserver\codex.exe`.
-- **Prevencao:** configure explicitamente `CodexPath` em `%APPDATA%\CodexTracker\settings.json` quando a descoberta falhar.
+- **Prevencao:** configure explicitamente `CodexPath` em `%APPDATA%\AqTracker\settings.json` quando a descoberta falhar.
 
 ## Inno Setup instalado pelo `winget`, mas `ISCC.exe` nao encontrado em `Program Files (x86)`
 
@@ -242,7 +263,7 @@
 
 ## ISPP nao suporta `ReadFile` ao obter a versao do instalador
 
-- **Sintoma:** o ISCC 6.7.3 falhava ao compilar `CodexTracker.iss` quando `AppVersion` era definido por `Trim(ReadFile("..\\VERSION"))`.
+- **Sintoma:** o ISCC 6.7.3 falhava ao compilar `AqTracker.iss` quando `AppVersion` era definido por `Trim(ReadFile("..\\VERSION"))`.
 - **Causa:** `ReadFile` nao e uma funcao suportada pelo preprocessor do Inno Setup nessa versao.
 - **Solucao:** `scripts\\build-installer.ps1` le e valida `VERSION`, entao passa `/DAppVersion=<versao>` ao ISCC. O `.iss` mantem somente um fallback literal protegido por `#ifndef`, para compilacao manual.
 - **Prevencao:** deixe I/O e validacao de arquivos no script PowerShell; no ISPP use definicoes recebidas por linha de comando ou macros compativeis.
@@ -277,15 +298,15 @@
 
 ## Upgrade falhava ao substituir `clrjit.dll` com o app na bandeja
 
-- **Sintoma:** o instalador abortava com `DeleteFile failed; code 5. Acesso negado` ao atualizar uma instalacao cujo Codex Tracker continuava aberto, inclusive oculto na bandeja.
+- **Sintoma:** o instalador abortava com `DeleteFile failed; code 5. Acesso negado` ao atualizar uma instalacao cujo Agent Quota Tracker continuava aberto, inclusive oculto na bandeja.
 - **Causa:** o Restart Manager registrava todos os arquivos do runtime self-contained (462 no repro), incluia `System` junto das instancias do app e recusava o fechamento com `Permission Denied + Session Mismatch`. Duas instancias instaladas podiam coexistir e manter `clrjit.dll` carregado. O desinstalador tambem nao encerrava automaticamente o processo antes de remover os arquivos.
-- **Solucao:** `CloseApplicationsFilter` limita o Restart Manager ao executavel exato `CodexTracker.exe`; o app usa mutex por caminho instalado para impedir duplicatas futuras. Um evento nomeado acionado por `--shutdown-existing` permite ao desinstalador solicitar shutdown gracioso e aguardar a liberacao do mutex antes da remocao.
+- **Solucao:** `CloseApplicationsFilter` limita o Restart Manager ao executavel exato `AqTracker.exe`; o app usa mutex por caminho instalado para impedir duplicatas futuras. Um evento nomeado acionado por `--shutdown-existing` permite ao desinstalador solicitar shutdown gracioso e aguardar a liberacao do mutex antes da remocao.
 - **Prevencao:** `scripts/test-installer-upgrade.ps1` cobre instalacao, duas instancias legadas, upgrade com app aberto, single-instance na nova versao, relancamento, uninstall com app aberto, preservacao das configuracoes e ausencia de processos/arquivos orfaos.
 
 ## Validação local de instalação comparava nome incorretamente
 
 - **Sintoma:** validação local informava falha de instalação mesmo com instalador concluído, porque o DisplayVersion retornava vazio ao ler a configuração por nome esperado.
-- **Causa:** o installer registra DisplayName como Codex Tracker version <version>, e a rotina de validação buscava exatamente Codex Tracker; também usava uma visão implícita de registro sem distinguir Registry32/Registry64.
+- **Causa:** o installer registra DisplayName como Agent Quota Tracker version <version>, e a rotina de validação buscava exatamente Agent Quota Tracker; também usava uma visão implícita de registro sem distinguir Registry32/Registry64.
 - **Solução:** validar pela chave estável do app ({D8C84F82-ED90-4F1F-AB4E-1455E5B66C2C}_is1) ou por prefixo de DisplayName, em HKCU Uninstall com Registry64 e Registry32, e comparar DisplayVersion com VERSION.
 - **Prevenção:** durante smoke de instalação, validar FileVersion do executável instalado e DisplayVersion da chave do uninstall, sem depender de igualdade exata de nome de exibição.
 
@@ -293,7 +314,7 @@
 
 - **Sintoma:** após atualizar do instalador .NET 8 auto-contido para o payload .NET Framework 4.8, o setup novo era pequeno, mas o diretório instalado ainda mantinha centenas de DLLs do runtime e mais de 150 MB.
 - **Causa:** a seção `[Files]` do Inno Setup copia os arquivos novos, mas não remove arquivos que deixaram de fazer parte do publish.
-- **Solução:** `[InstallDelete]` remove somente o conteúdo de `{app}` antes de copiar o novo payload. `CloseApplications` continua encerrando apenas `CodexTracker.exe`, e `%APPDATA%\CodexTracker` não é tocado.
+- **Solução:** `[InstallDelete]` remove somente o conteúdo de `{app}` antes de copiar o novo payload. `CloseApplications` continua encerrando apenas `AqTracker.exe`, e `%APPDATA%\AqTracker` não é tocado.
 - **Prevenção:** toda migração que reduz ou renomeia o payload deve testar upgrade sobre a versão anterior e medir contagem/tamanho do diretório instalado, além do tamanho do setup.
 
 ## Popup de agentes travava na tela durante arraste do widget
@@ -347,7 +368,7 @@
 
 ## Operadores de range/index (`x[1..]`) não compilam no target net48
 
-- **Sintoma:** código novo usando `texto[1..]`, `texto[..indice]` ou `texto[^1]` compilaria em um projeto net8.0, mas falharia com `CS0518: Predefined type 'System.Index' is not defined` (ou `System.Range`) neste repositório, que ainda tem `TargetFramework=net48` em `CodexTracker`, `CodexTracker.Core` e `CodexTracker.Tests`.
+- **Sintoma:** código novo usando `texto[1..]`, `texto[..indice]` ou `texto[^1]` compilaria em um projeto net8.0, mas falharia com `CS0518: Predefined type 'System.Index' is not defined` (ou `System.Range`) neste repositório, que ainda tem `TargetFramework=net48` em `AqTracker`, `AqTracker.Core` e `AqTracker.Tests`.
 - **Causa:** `System.Index`/`System.Range` não existem no mscorlib do .NET Framework 4.8; `Microsoft.NETFramework.ReferenceAssemblies` fornece apenas as assemblies de referência do framework real, sem um shim para esses tipos. `LangVersion=latest` permite a sintaxe no compilador, mas o binding dos tipos falha em tempo de compilação.
 - **Solução:** evitar `[..]`/`[^]` em qualquer projeto do repositório (todos net48); usar `string.Substring(start)`/`string.Substring(start, length)` equivalentes. Coleções (`[]`, `[..spread]`) continuam permitidas normalmente, pois expression collections não dependem de `System.Index`/`System.Range`.
 - **Prevenção:** ao escrever código novo, prefira revisar arquivos já existentes no mesmo projeto para confirmar quais recursos de C# 8+ realmente compilam sob net48 antes de assumir que qualquer sintaxe válida para `LangVersion=latest` também é válida no runtime alvo.
@@ -358,3 +379,10 @@
 - **Causa:** dois `MultiDataTrigger`s misturavam `IsMouseOver` e `IsAgentListOpen`; a troca essencial de visibilidade ficou acoplada ao estado da lista em vez de depender somente do hover do botão.
 - **Solução:** um `Trigger` direto de `IsMouseOver` agora oculta o número e mostra o chevron; um `DataTrigger` independente altera apenas o traço para cima quando a lista está aberta. As linhas também passaram a usar overlays sem hit-test, com hover de 400 ms e ripple de 600 ms que não bloqueiam o deep link.
 - **Prevenção:** mantenha a visibilidade de affordances de hover em um trigger único do controle; estados de dados devem ajustar somente a aparência variante. Cubra o template com teste estrutural que exija o trigger direto e rejeite `MultiDataTrigger` nessa superfície.
+
+## Configurações abriam altas e encolhiam alguns segundos depois
+
+- **Sintoma:** ao abrir Configurações, a janela surgia alta (até 720 DIP) e, segundos depois, encolhia para 440 DIP sem interação.
+- **Causa:** dois caminhos disputavam a altura. `Settings()` chamava `ScheduleSettingsHeightForContent()`, que media o conteúdo inteiro (sem limite do `ScrollViewer`) e expandia a janela; depois, qualquer snapshot de cota ou mudança de perfil chamava `ApplyWindowModeSize()`, que redefinia o modo Settings para `SettingsMinHeight` (440).
+- **Solução:** removido o ajuste ao conteúdo. O modo Settings tem uma única altura fixa (`WidgetSizePolicy.SettingsHeight` = 572, 30% acima de 440) limitada à área de trabalho por `SettingsHeightForWorkArea`, e todo chamador de `ApplyWindowModeSize()` resolve para o mesmo valor; o conteúdo rola.
+- **Prevenção:** um modo de janela deve ter uma única fonte de altura; não agende re-medições assíncronas que outro caminho síncrono possa sobrescrever.

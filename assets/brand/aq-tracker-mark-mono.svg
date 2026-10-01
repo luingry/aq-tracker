@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-labelledby="title desc">
+  <title id="title">Agent Quota Tracker monochrome mark</title>
+  <desc id="desc">An open square cycle representing weekly quota.</desc>
+  <path d="M17 50h29a4 4 0 0 0 4-4V18a4 4 0 0 0-4-4H14"
+        fill="none" stroke="#283335" stroke-width="10" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M14 27v10"
+        fill="none" stroke="#283335" stroke-width="10" stroke-linecap="round"/>
+</svg>

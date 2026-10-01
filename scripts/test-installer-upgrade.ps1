@@ -7,20 +7,20 @@ param(
 $ErrorActionPreference = 'Stop'
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $artifacts = Join-Path $repoRoot 'artifacts'
-$installedExe = Join-Path $env:LOCALAPPDATA 'Programs\Codex Tracker\CodexTracker.exe'
-$settingsDir = Join-Path $env:APPDATA 'CodexTracker'
+$installedExe = Join-Path $env:LOCALAPPDATA 'Programs\Agent Quota Tracker\AqTracker.exe'
+$settingsDir = Join-Path $env:APPDATA 'AqTracker'
 $retentionMarker = Join-Path $settingsDir 'installer-qa-retention.marker'
 $settingsDirExisted = Test-Path -LiteralPath $settingsDir
 
 if (-not $UpgradeInstaller) {
-    $UpgradeInstaller = Get-ChildItem -LiteralPath $artifacts -Filter 'CodexTracker-Setup-*.exe' |
-        Sort-Object { [version]($_.BaseName -replace '^CodexTracker-Setup-', '') } -Descending |
+    $UpgradeInstaller = Get-ChildItem -LiteralPath $artifacts -Filter 'AqTracker-Setup-*.exe' |
+        Sort-Object { [version]($_.BaseName -replace '^AqTracker-Setup-', '') } -Descending |
         Select-Object -First 1 -ExpandProperty FullName
 }
 if (-not $BaselineInstaller) {
-    $BaselineInstaller = Get-ChildItem -LiteralPath $artifacts -Filter 'CodexTracker-Setup-*.exe' |
+    $BaselineInstaller = Get-ChildItem -LiteralPath $artifacts -Filter 'AqTracker-Setup-*.exe' |
         Where-Object FullName -ne $UpgradeInstaller |
-        Sort-Object { [version]($_.BaseName -replace '^CodexTracker-Setup-', '') } -Descending |
+        Sort-Object { [version]($_.BaseName -replace '^AqTracker-Setup-', '') } -Descending |
         Select-Object -First 1 -ExpandProperty FullName
 }
 if (-not (Test-Path -LiteralPath $BaselineInstaller) -or -not (Test-Path -LiteralPath $UpgradeInstaller)) {
@@ -55,12 +55,12 @@ if (@(Get-InstalledProcesses).Count -ne 0) {
 New-Item -ItemType Directory -Path $settingsDir -Force | Out-Null
 Set-Content -LiteralPath $retentionMarker -Value 'retain-on-uninstall' -NoNewline
 
-$baselineLog = Invoke-Installer $BaselineInstaller 'codex-tracker-qa-baseline.log'
+$baselineLog = Invoke-Installer $BaselineInstaller 'aq-tracker-qa-baseline.log'
 $first = Start-Process -FilePath $installedExe -PassThru
 $second = Start-Process -FilePath $installedExe -PassThru
 $baselineProcesses = Wait-ForProcessCount 2
 
-$upgradeLog = Invoke-Installer $UpgradeInstaller 'codex-tracker-qa-upgrade.log'
+$upgradeLog = Invoke-Installer $UpgradeInstaller 'aq-tracker-qa-upgrade.log'
 [void](Wait-ForProcessCount 0)
 
 $newFirst = Start-Process -FilePath $installedExe -PassThru
@@ -71,7 +71,7 @@ Start-Sleep -Milliseconds 300
 if (@(Get-InstalledProcesses).Count -ne 1) { throw 'Single-instance mutex did not reject the second upgraded launch.' }
 
 $uninstaller = Join-Path (Split-Path -Parent $installedExe) 'unins000.exe'
-$uninstallLog = Join-Path $env:TEMP 'codex-tracker-qa-uninstall.log'
+$uninstallLog = Join-Path $env:TEMP 'aq-tracker-qa-uninstall.log'
 $uninstall = Start-Process -FilePath $uninstaller -ArgumentList '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', "/LOG=$uninstallLog" -Wait -PassThru
 if ($uninstall.ExitCode -ne 0) { throw "Uninstaller failed with exit code $($uninstall.ExitCode)." }
 [void](Wait-ForProcessCount 0)

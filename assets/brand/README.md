@@ -1,4 +1,4 @@
-# Codex Tracker mark
+# Agent Quota Tracker mark
 
 The mark is an open, square cycle: the long ink segment is used quota and the
 short sage segment is the remaining allowance. Its gap makes the state feel
@@ -7,11 +7,11 @@ language.
 
 ## Files
 
-- `codex-tracker-mark.svg` — primary transparent mark for light surfaces.
-- `codex-tracker-mark-dark.svg` — light mark for dark surfaces.
-- `codex-tracker-mark-mono.svg` — single-ink fallback for constrained contexts.
-- `codex-tracker-app-icon.svg` — porcelain-tile application/installer source.
-- `png/` and `codex-tracker.ico` — generated derivatives; regenerate with
+- `aq-tracker-mark.svg` — primary transparent mark for light surfaces.
+- `aq-tracker-mark-dark.svg` — light mark for dark surfaces.
+- `aq-tracker-mark-mono.svg` — single-ink fallback for constrained contexts.
+- `aq-tracker-app-icon.svg` — porcelain-tile application/installer source.
+- `png/` and `aq-tracker.ico` — generated derivatives; regenerate with
   `scripts/export-brand-assets.ps1` when the source changes. The exporter uses
   Windows `System.Drawing` and mirrors the source SVG's geometry.
 
@@ -21,6 +21,6 @@ recognizable at tray sizes.
 
 ## Authorship and license
 
-This geometry was created specifically for Codex Tracker on 2026-08-12. It is
+This geometry was created specifically for Agent Quota Tracker on 2026-08-12. It is
 original work, contains no third-party logo or icon source, and is distributed
 under the repository's MIT license.

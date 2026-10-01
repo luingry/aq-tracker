@@ -1,4 +1,4 @@
-# Design do Codex Tracker 0.4.7
+# Design do Agent Quota Tracker 0.4.7
 
 ## Direção visual
 
@@ -29,4 +29,4 @@ Quota e analytics têm fontes e garantias diferentes. A quota vem do `codex app-
 
 ## Upgrade e instância única
 
-A aplicação permite uma única instância por caminho de executável. Uma segunda inicialização termina sem abrir outra janela. Para upgrade seguro, o instalador fecha automaticamente a instância em execução via Restart Manager e filtro de aplicações antes de substituir os binários; o desinstalador usa `--shutdown-existing`. Não é necessário encerrar o app manualmente. O instalador por usuário preserva `%APPDATA%\CodexTracker\settings.json`, mantendo posição, tamanho, modo, topmost, tema, idioma, cor de destaque, moeda e caminho configurado do Codex.
+A aplicação permite uma única instância por caminho de executável. Uma segunda inicialização termina sem abrir outra janela. Para upgrade seguro, o instalador fecha automaticamente a instância em execução via Restart Manager e filtro de aplicações antes de substituir os binários; o desinstalador usa `--shutdown-existing`. Não é necessário encerrar o app manualmente. O instalador por usuário preserva `%APPDATA%\AqTracker\settings.json`, mantendo posição, tamanho, modo, topmost, tema, idioma, cor de destaque, moeda e caminho configurado do Codex.

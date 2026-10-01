@@ -60,7 +60,7 @@ jobs:
 
           $notesPath = Join-Path $env:RUNNER_TEMP 'release-notes.md'
           $lines[$start..($end - 1)] | Set-Content -LiteralPath $notesPath -Encoding utf8
-          $installerPath = Join-Path artifacts "CodexTracker-Setup-$version.exe"
+          $installerPath = Join-Path artifacts "AqTracker-Setup-$version.exe"
           if (-not (Test-Path -LiteralPath $installerPath -PathType Leaf)) {
             throw "Installer build did not produce $installerPath."
           }
@@ -73,7 +73,7 @@ jobs:
       - name: Upload setup artifact
         uses: actions/upload-artifact@v4
         with:
-          name: CodexTracker-Setup-${{ steps.release_metadata.outputs.version }}
+          name: AqTracker-Setup-${{ steps.release_metadata.outputs.version }}
           path: ${{ steps.release_metadata.outputs.installer_path }}
           if-no-files-found: error
 
@@ -87,7 +87,7 @@ jobs:
           $tag = '${{ steps.release_metadata.outputs.tag }}'
           $installer = '${{ steps.release_metadata.outputs.installer_path }}'
           $notes = '${{ steps.release_metadata.outputs.notes_path }}'
-          $title = 'Codex Tracker ${{ steps.release_metadata.outputs.version }}'
+          $title = 'Agent Quota Tracker ${{ steps.release_metadata.outputs.version }}'
 
           function Get-GhHttpStatus([string] $output) {
             $match = [regex]::Match($output, '(?im)\b(?:HTTP\s+|status\s+code:\s*)(\d{3})\b')
@@ -206,10 +206,15 @@ jobs:
           }
           if (-not $edited.Succeeded) { throw "Failed to update release $tag." }
 
-          $uploaded = Invoke-GhWithRetry -Action "Upload setup asset for $tag" -Command {
-            gh release upload $tag $installer --clobber
+          # Installs from before the Agent Quota Tracker rename (<= 0.22.x) only recognize the
+          # CodexTracker-Setup-<version>.exe asset name, so the same setup is also published under it.
+          $legacyInstaller = Join-Path (Split-Path -Parent $installer) ("CodexTracker-Setup-" + $tag.TrimStart('v') + ".exe")
+          Copy-Item -LiteralPath $installer -Destination $legacyInstaller -Force
+
+          $uploaded = Invoke-GhWithRetry -Action "Upload setup assets for $tag" -Command {
+            gh release upload $tag $installer $legacyInstaller --clobber
           }
-          if (-not $uploaded.Succeeded) { throw "Failed to upload the setup asset for $tag." }
+          if (-not $uploaded.Succeeded) { throw "Failed to upload the setup assets for $tag." }
 
           $endpoint = "repos/$env:GITHUB_REPOSITORY/releases?per_page=100"
           $releaseList = Invoke-GhWithRetry -Action 'List releases for cleanup' -ReturnTransientFailure -Command {

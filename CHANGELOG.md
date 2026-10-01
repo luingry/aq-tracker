@@ -1,5 +1,77 @@
 # Changelog
 
+## [0.24.1] - 2026-10-01
+
+This release consolidates the unpublished changes since 0.21.0.
+
+### Added
+
+- Independent Claude profile with 5h/7d quota polling, OAuth PKCE sign-in, encrypted per-user DPAPI token storage, live session activity and unread completions.
+- "Detalhes do consumo", a collapsed-by-default section below the Codex quota indicators, groups consumption totals and costs, coverage, ranking, the daily chart and per-chat details. A chevron indicates its expanded state.
+
+### Changed
+
+- Renamed the product and repository to **Agent Quota Tracker** (`aq-tracker`), with `AqTracker.exe`, updated projects, installer, documentation and brand assets. Upgrades retain the installer AppId and migrate the legacy installation and user data to the new folders. The release also provides the legacy installer asset name for existing updaters.
+- Redesigned Settings into General, Codex, Claude and About sections, with switches, contextual Claude connection actions, borderless cards and eyedropper icons for color pickers. Settings opens at a stable, work-area-limited height and scrolls its content.
+- Claude detail quotas now use circular remaining-percentage indicators with reset text on the right, matching Codex. Both profiles show 5h/7d inside the circle and "JANELA 5H"/"SEMANAL" above the reset date and time.
+- Removed the "Dados ao vivo via Codex" status footer from the detail screen.
+
+### Fixed
+
+- Agent separators consistently identify Codex or Claude, including a single agent or unread completion. Selected compact quota windows remain visible side by side for both platforms, with widget size adapting to their count.
+- Claude desktop agent rows open their specific chat through a validated session deep link, with a foreground fallback for CLI sessions and failed launches.
+- Detailed layout callbacks no longer calculate screen coordinates after the window disconnects from its presentation source.
+
+## [0.24.0] - 2026-10-01
+
+### Added
+
+- A collapsed-by-default "Detalhes do consumo" section below Codex detail quotas groups consumption totals and costs, coverage, ranking, daily usage chart and the per-chat details action. Its chevron points down when closed and up when expanded.
+
+## [0.23.3] - 2026-10-01
+
+### Fixed
+
+- Codex and Claude color pickers use an eyedropper icon instead of a select chevron.
+- Settings cards and the action footer no longer have solid wrapper borders.
+- Claude detail quotas match Codex with circular remaining-percentage indicators and reset text on the right. Both platforms show 5h/7d inside each circle and the localized "JANELA 5H"/"SEMANAL" heading above the reset date and time.
+- Detailed layout callbacks skip screen-coordinate calculations after the window disconnects from its presentation source.
+
+## [0.23.2] - 2026-10-01
+
+### Fixed
+
+- Agent list separators always show the platform name (Codex or Claude), including a single active agent or unread completion and transitions from multiple platforms to one. Project ordering and row identity remain intact.
+
+## [0.23.1] - 2026-10-01
+
+### Fixed
+
+- Simultaneous Codex and Claude agents are grouped by platform with the existing name-and-line separator. A single platform retains project grouping, row identity and unread completions.
+- Compact quotas retain every selected 5h/7d window for each engaged platform, shown side by side without replacing another platform's weekly quota. Widget width and resize regions adapt to the actual indicator count while preserving the saved circle scale.
+
+## [0.23.0] - 2026-10-01
+
+### Changed
+
+- The project is now **Agent Quota Tracker** (`aq-tracker`, formerly Codex Tracker), reflecting that it tracks both Codex and Claude. Solution, projects, namespaces, executable (`AqTracker.exe`), installer (`AqTracker-Setup-<version>.exe`), brand assets, README and the GitHub repository (`luingry/aq-tracker`) were renamed.
+- Settings were redesigned: General, Codex, Claude and About cards with clear section titles and profile color markers; on/off preferences are switches aligned to the right; buttons follow a defined hierarchy (primary, secondary, ghost, danger and field pickers), and color pickers are left-aligned like other fields.
+- The Claude section shows a single connection status pill and only the actions valid for that state: connect (or reconnect) when signed out, disconnect when signed in, and only cancel while a sign-in is pending. The duplicated "Connected" text was removed.
+
+### Fixed
+
+- Settings opens directly at its final height instead of starting tall and shrinking a few seconds later when a quota snapshot arrived. The fixed height is 572 DIP (30% above the previous 440 DIP), limited by the monitor work area, and the content scrolls.
+
+### Migration
+
+- Upgrades keep the installer AppId, move the app to `%LOCALAPPDATA%\Programs\Agent Quota Tracker`, close and remove the legacy `Codex Tracker` folder, shortcuts and autostart entry, and the app moves `%APPDATA%\CodexTracker` to `%APPDATA%\AqTracker` on first start (stray files in an `AqTracker` folder without `settings.json`, such as a dev or test run's quota history, do not block it). Releases also publish the setup as `CodexTracker-Setup-<version>.exe` so installs up to 0.22.x still find the update.
+
+## [0.22.1] - 2026-10-01
+
+### Fixed
+
+- Claude agent rows now open the specific desktop chat using a validated host session deep link, preserving the id through activity and unread completion persistence. CLI sessions and failed launches fall back to bringing Claude to the foreground.
+
 ## [0.22.0] - 2026-10-01
 
 ### Added

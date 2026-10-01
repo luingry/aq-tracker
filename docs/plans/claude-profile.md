@@ -57,7 +57,7 @@ Um perfil está engajado se qualquer uma das condições abaixo for verdadeira:
 - Refresh: quando faltarem menos de 5 min para expirar, ou em resposta 401, envia `{grant_type:"refresh_token", refresh_token, client_id}` e persiste o novo `refresh_token` de forma atômica. Em `invalid_grant`, 400 ou 401 após o refresh, marca como desconectado e o status passa a "Reconectar Claude".
 - Armazenamento: arquivo ao lado das settings, cifrado com DPAPI `ProtectedData` (`CurrentUser`). Escrita atômica (tmp + replace). "Desconectar" apaga o arquivo.
 - Uso:
-  - `GET UsageUrl` com os headers `Authorization: Bearer`, `anthropic-beta: oauth-2025-04-20` e `User-Agent: codex-tracker/<versão>`.
+  - `GET UsageUrl` com os headers `Authorization: Bearer`, `anthropic-beta: oauth-2025-04-20` e `User-Agent: aq-tracker/<versão>`.
   - Interpretar `five_hour` e `seven_day` como `{utilization: número 0–100 ou null, resets_at: string ISO ou null}`. Ignorar as demais chaves.
   - Mapear para `QuotaWindow` com ids `claude:five_hour` (300 min) e `claude:seven_day` (10080 min).
 - Polling: a cada 60 s junto com o refresh atual, e imediatamente quando o perfil Claude ficar engajado e o último dado tiver mais de 60 s. Em 429 ou 5xx, backoff exponencial até 10 min.
@@ -75,12 +75,12 @@ Um perfil está engajado se qualquer uma das condições abaixo for verdadeira:
 
 ## Restrições
 - Somente `net48` e as APIs já usadas no projeto. Sem pacotes NuGet novos (DPAPI vem da referência de framework `System.Security`).
-- Siga o estilo do código ao redor. Lógica pura em `CodexTracker.Core`, testável sem UI.
+- Siga o estilo do código ao redor. Lógica pura em `AqTracker.Core`, testável sem UI.
 - Não altere o comportamento atual do Codex, exceto o que está descrito acima.
 - `VERSION` = `0.22.0`. Adicionar seção `## [0.22.0]` no `CHANGELOG.md` (Keep a Changelog). Atualizar o README (o que faz / dados e privacidade). Registrar no `ERRORS.md` os erros não triviais resolvidos.
 - Não fazer commit nem push, não rodar o instalador, não instalar.
 
-## Testes obrigatórios (em `tests/CodexTracker.Tests/Program.cs`, no padrão atual)
+## Testes obrigatórios (em `tests/AqTracker.Tests/Program.cs`, no padrão atual)
 1. Matriz da regra de engajamento e exibição: só Codex, só Claude, os dois, nenhum com widget ativo; foco + trabalho; foco + não lido; minimizado.
 2. Leitor de sessões com diretório de exemplo:
    - `busy`/`idle`/desconhecido;
@@ -104,6 +104,6 @@ Um perfil está engajado se qualquer uma das condições abaixo for verdadeira:
 8. Todos os testes existentes continuam passando.
 
 ## Critério de aceite
-- `dotnet build .\CodexTracker.sln` sem erros e sem warnings novos.
-- `dotnet run --project .\tests\CodexTracker.Tests\CodexTracker.Tests.csproj` 100% verde.
+- `dotnet build .\AqTracker.sln` sem erros e sem warnings novos.
+- `dotnet run --project .\tests\AqTracker.Tests\AqTracker.Tests.csproj` 100% verde.
 - Ao final, entregar um resumo listando os arquivos alterados, as decisões tomadas e qualquer ponto não implementado.

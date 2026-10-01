@@ -1,13 +1,24 @@
-# Codex Tracker
+# Agent Quota Tracker (aq-tracker)
 
-A native Windows widget for Codex and Claude quotas, local Codex usage analytics, and live agent activity.
+A native Windows widget that tracks the usage quotas of your AI coding agents — **Codex** and **Claude** — side by side, with local Codex usage analytics and live agent activity.
+
+> Formerly **Codex Tracker**. The project was renamed when it stopped being Codex-only. Existing installs upgrade in place: the installer moves the app to `%LOCALAPPDATA%\Programs\Agent Quota Tracker` and the app moves your settings from `%APPDATA%\CodexTracker` to `%APPDATA%\AqTracker` on first start.
 
 <p align="center">
-  <img src="assets/screenshots/codex-tracker-detailed.png" alt="Codex Tracker detailed widget showing weekly quota, analytics, model ranking, and daily usage" width="46%" />
-  <img src="assets/screenshots/codex-tracker-agents.png" alt="Codex Tracker compact widget showing the active agents and subagents list" width="46%" />
+  <img src="assets/screenshots/aq-tracker-detailed.png" alt="Agent Quota Tracker detailed widget showing weekly quota, analytics, model ranking, and daily usage" width="46%" />
+  <img src="assets/screenshots/aq-tracker-agents.png" alt="Agent Quota Tracker compact widget showing the active agents and subagents list" width="46%" />
 </p>
 
 <p align="center"><sub>Screenshots show the v0.11.4 interface; the latest release may be newer.</sub></p>
+
+## Supported agents
+
+| Agent | Quota | Activity | Sign-in |
+| --- | --- | --- | --- |
+| Codex | Official 5h and weekly quota via the Codex CLI app-server, plus local token/cost analytics | Live agents and subagents with deep links to the chat | Uses your existing Codex CLI login |
+| Claude | 5h and 7d remaining quota and resets | Live interactive Claude Code sessions and unread completions | Optional, independent OAuth sign-in from Settings |
+
+Each agent has its own profile color and its own section in Settings.
 
 ## What it does
 
@@ -25,13 +36,13 @@ A native Windows widget for Codex and Claude quotas, local Codex usage analytics
 ## Requirements
 
 - Windows 10 22H2 or newer, or Windows 11.
-- An authenticated Codex CLI installation. Codex Tracker reads the official quota through the Codex CLI app-server.
+- An authenticated Codex CLI installation. Agent Quota Tracker reads the official quota through the Codex CLI app-server.
 - Claude quota is optional: connect from Settings with a browser callback or the manual `code#state` flow. Claude session activity uses local Claude Code registrations; desktop metadata and window focus are optional.
 - The released app targets **.NET Framework 4.8** (`net48`).
 
 ## Install
 
-Download and run the installer from the [latest release](https://github.com/luingry/codex-tracker/releases/latest). The installer preserves your local settings and the application detects `codex.exe` automatically when possible.
+Download and run the installer from the [latest release](https://github.com/luingry/aq-tracker/releases/latest). The installer preserves your local settings and the application detects `codex.exe` automatically when possible.
 
 ## Data and privacy
 
@@ -41,19 +52,19 @@ Local-history analytics cover only the Codex data available on this Windows mach
 
 Claude activity is read from live interactive registrations in `%USERPROFILE%\.claude\sessions` and optional session-specific desktop metadata in `%APPDATA%\Claude\claude-code-sessions`. Dead registrations and malformed JSON are ignored. A process disappearing does not create an unread completion. Confirmed session focus after completion, reactivation, a row click or marking all read clears it.
 
-The Tracker never reads or writes Claude Code's credential file. It obtains its own OAuth tokens using PKCE and validates the login state. Tokens are encrypted with Windows DPAPI for the current user in `claude-tokens.dat` beside `settings.json` in `%APPDATA%\CodexTracker`; writes and refresh-token rotation are atomic. Disconnect deletes those tokens and the cached Claude quota. The Tracker sends only OAuth requests and authenticated quota requests to Claude/Anthropic endpoints; session history is not uploaded. Tokens, authorization codes and headers are not written to logs.
+The Tracker never reads or writes Claude Code's credential file. It obtains its own OAuth tokens using PKCE and validates the login state. Tokens are encrypted with Windows DPAPI for the current user in `claude-tokens.dat` beside `settings.json` in `%APPDATA%\AqTracker`; writes and refresh-token rotation are atomic. Disconnect deletes those tokens and the cached Claude quota. The Tracker sends only OAuth requests and authenticated quota requests to Claude/Anthropic endpoints; session history is not uploaded. Tokens, authorization codes and headers are not written to logs.
 
 Claude usage is polled every 60 seconds and on engagement when older than 60 seconds, with a maximum ten-minute backoff for rate limiting or server failures. `claude-quota.json` stores the latest snapshot, shown as out of date after restart. The profile can be disabled in settings without changing Codex analytics.
 
 ## Development
 
 ```powershell
-dotnet build .\CodexTracker.sln
-dotnet run --project .\tests\CodexTracker.Tests\CodexTracker.Tests.csproj
+dotnet build .\AqTracker.sln
+dotnet run --project .\tests\AqTracker.Tests\AqTracker.Tests.csproj
 .\scripts\finalize-build.ps1
 ```
 
-The generated installer is `artifacts\CodexTracker-latest.exe`.
+The generated installer is `artifacts\AqTracker-latest.exe`.
 
 ## License
 

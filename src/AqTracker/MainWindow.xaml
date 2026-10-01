@@ -1,0 +1,590 @@
+<Window x:Class="AqTracker.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:local="clr-namespace:AqTracker"
+        Title="{DynamicResource Loc.AppTitle}"
+        Width="62" Height="52" MinWidth="62" MinHeight="52"
+        WindowStyle="None" ResizeMode="NoResize" ShowInTaskbar="False" ShowActivated="False"
+        AllowsTransparency="True" Background="Transparent"
+        FontFamily="./assets/fonts/#Atkinson Hyperlegible Next">
+  <Border x:Name="WindowSurface" CornerRadius="12" ClipToBounds="True" SnapsToDevicePixels="True">
+    <Border.Style>
+      <Style TargetType="Border">
+        <Setter Property="Background" Value="Transparent" />
+        <Style.Triggers>
+          <DataTrigger Binding="{Binding Expanded}" Value="True">
+            <Setter Property="Background" Value="{DynamicResource DetailedSurface}" />
+          </DataTrigger>
+          <DataTrigger Binding="{Binding Visibility, ElementName=SettingsPanel}" Value="Visible">
+            <Setter Property="Background" Value="{DynamicResource SettingsSurface}" />
+          </DataTrigger>
+        </Style.Triggers>
+      </Style>
+    </Border.Style>
+    <Grid x:Name="Root" MouseLeftButtonDown="DragWindow" MouseEnter="ShowChrome" MouseLeave="HideChrome">
+      <Grid x:Name="MainContent">
+        <Grid.Style>
+          <Style TargetType="Grid">
+            <Setter Property="Visibility" Value="Visible" />
+            <Setter Property="Opacity" Value="1" />
+            <Setter Property="IsHitTestVisible" Value="True" />
+            <Style.Triggers>
+              <DataTrigger Binding="{Binding Visibility, ElementName=SettingsPanel}" Value="Visible">
+                <!-- Preserve the root measure while Settings expands the window. Collapsing
+                     this subtree could leave the sibling settings visual unarranged for a frame. -->
+                <Setter Property="Opacity" Value="0" />
+                <Setter Property="IsHitTestVisible" Value="False" />
+              </DataTrigger>
+            </Style.Triggers>
+          </Style>
+        </Grid.Style>
+        <!-- The compact gauge is vector-laid out at its final size; no region crop or Viewbox raster scaling. -->
+        <StackPanel Visibility="{Binding Expanded, Converter={StaticResource CompactVisibility}}" HorizontalAlignment="Center" VerticalAlignment="Top">
+          <Grid x:Name="CompactGaugeHost" Width="{Binding ActualWidth, ElementName=Root}">
+            <Grid.Height><MultiBinding Converter="{StaticResource CompactQuotaGaugeSize}" ConverterParameter="HostHeight"><Binding ElementName="Root" Path="ActualWidth" /><Binding Path="CompactQuotaCount" /></MultiBinding></Grid.Height>
+            <ItemsControl x:Name="CompactQuotaGauges" ItemsSource="{Binding CompactQuotas}" HorizontalAlignment="Center" VerticalAlignment="Center">
+              <ItemsControl.ItemsPanel><ItemsPanelTemplate><StackPanel Orientation="Horizontal" /></ItemsPanelTemplate></ItemsControl.ItemsPanel>
+              <ItemsControl.ItemTemplate>
+                <DataTemplate>
+              <Grid x:Name="CompactGauge" Margin="3,0" ToolTip="{Binding Tooltip}">
+                <Grid.Width><MultiBinding Converter="{StaticResource CompactQuotaGaugeSize}"><Binding RelativeSource="{RelativeSource AncestorType=Window}" Path="ActualWidth" /><Binding RelativeSource="{RelativeSource AncestorType=Window}" Path="DataContext.CompactQuotaCount" /></MultiBinding></Grid.Width>
+                <Grid.Height><MultiBinding Converter="{StaticResource CompactQuotaGaugeSize}"><Binding RelativeSource="{RelativeSource AncestorType=Window}" Path="ActualWidth" /><Binding RelativeSource="{RelativeSource AncestorType=Window}" Path="DataContext.CompactQuotaCount" /></MultiBinding></Grid.Height>
+                <Ellipse Fill="{DynamicResource GlassSurface}"><Ellipse.Effect><DropShadowEffect BlurRadius="5" ShadowDepth="1" Opacity=".30" Color="#151A18" /></Ellipse.Effect></Ellipse>
+                <local:CircularQuotaGauge AutomationProperties.Name="{Binding AccessibleName}" Value="{Binding Remaining}" TrackBrush="{DynamicResource GaugeTrack}" ProgressBrush="{Binding Brush}" StrokeThickness="3" IsWorking="{Binding IsWorking}" />
+                <TextBlock Text="{Binding Label}" FontFamily="./assets/fonts/#Source Sans 3" FontWeight="SemiBold" Foreground="{Binding Brush}" HorizontalAlignment="Center" VerticalAlignment="Top" Margin="0,5,0,0" IsHitTestVisible="False"><TextBlock.FontSize><MultiBinding Converter="{StaticResource CompactQuotaGaugeSize}" ConverterParameter="Label"><Binding RelativeSource="{RelativeSource AncestorType=Window}" Path="ActualWidth" /><Binding RelativeSource="{RelativeSource AncestorType=Window}" Path="DataContext.CompactQuotaCount" /></MultiBinding></TextBlock.FontSize></TextBlock>
+                <TextBlock Text="{Binding Percent}" FontFamily="./assets/fonts/#Source Sans 3" FontWeight="Bold" Foreground="{DynamicResource Ink}" HorizontalAlignment="Center" VerticalAlignment="Center" IsHitTestVisible="False"><TextBlock.FontSize><MultiBinding Converter="{StaticResource CompactQuotaGaugeSize}" ConverterParameter="Percent"><Binding RelativeSource="{RelativeSource AncestorType=Window}" Path="ActualWidth" /><Binding RelativeSource="{RelativeSource AncestorType=Window}" Path="DataContext.CompactQuotaCount" /></MultiBinding></TextBlock.FontSize></TextBlock>
+              </Grid>
+                </DataTemplate>
+              </ItemsControl.ItemTemplate>
+            </ItemsControl>
+          </Grid>
+          <Button x:Name="AgentIndicatorButton" Width="20" Height="20" Padding="0" Margin="0,-1,0,5"
+                  Visibility="{Binding HasAgentIndicator, Converter={StaticResource BooleanToVisibility}}"
+                  Click="ToggleAgentList" ToolTip="{Binding AgentIndicatorTooltip}" AutomationProperties.Name="{Binding AgentIndicatorTooltip}">
+            <Button.Template>
+              <ControlTemplate TargetType="Button">
+                <Grid>
+                  <Border x:Name="AgentIndicatorSurface" Background="#2D2D2D" CornerRadius="10" ClipToBounds="True">
+                    <Border.Effect><DropShadowEffect BlurRadius="5" ShadowDepth="1" Opacity=".30" Color="#151A18" /></Border.Effect>
+                    <Grid>
+                      <Path x:Name="AgentWorkSpinner" Width="18" Height="18" Data="M9,0 A9,9 0 0 1 14.29,1.72" Stretch="None" Stroke="#FFFFFF" StrokeThickness="1" Opacity=".50" StrokeStartLineCap="Round" StrokeEndLineCap="Round" Visibility="Collapsed" IsHitTestVisible="False" RenderTransformOrigin="0.5,0.5">
+                        <Path.RenderTransform><RotateTransform x:Name="AgentWorkSpinnerRotation" Angle="0" /></Path.RenderTransform>
+                      </Path>
+                      <TextBlock x:Name="AgentCount" Text="{Binding ActiveAgentCount}" FontFamily="./assets/fonts/#Source Sans 3" FontSize="11.5" FontWeight="Bold" Foreground="White" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                      <Path x:Name="AgentCompletedCheck" Width="10" Height="8" Data="M1,4L4,7L9,1" Stretch="Uniform" Stroke="#168A4A" StrokeThickness="1.8" StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round" HorizontalAlignment="Center" VerticalAlignment="Center" Visibility="Collapsed" />
+                      <Path x:Name="AgentArrow" Width="9" Height="6" Data="M1,1L5,5L9,1" Stretch="Uniform" Stroke="White" StrokeThickness="1.5" StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round" HorizontalAlignment="Center" VerticalAlignment="Center" Visibility="Collapsed" />
+                    </Grid>
+                  </Border>
+                </Grid>
+                <ControlTemplate.Triggers>
+                  <Trigger Property="IsMouseOver" Value="True">
+                    <Setter TargetName="AgentCount" Property="Visibility" Value="Collapsed" />
+                    <Setter TargetName="AgentCompletedCheck" Property="Visibility" Value="Collapsed" />
+                    <Setter TargetName="AgentArrow" Property="Visibility" Value="Visible" />
+                    <Setter TargetName="AgentIndicatorSurface" Property="Opacity" Value=".86" />
+                  </Trigger>
+                  <DataTrigger Binding="{Binding IsAgentListOpen}" Value="True">
+                    <Setter TargetName="AgentArrow" Property="Data" Value="M1,5L5,1L9,5" />
+                  </DataTrigger>
+                  <DataTrigger Binding="{Binding IsWorkAnimationEnabled}" Value="True">
+                    <Setter TargetName="AgentWorkSpinner" Property="Visibility" Value="Visible" />
+                    <DataTrigger.EnterActions>
+                      <BeginStoryboard x:Name="AgentWorkSpinnerStoryboard">
+                        <Storyboard RepeatBehavior="Forever">
+                          <DoubleAnimation Storyboard.TargetName="AgentWorkSpinnerRotation" Storyboard.TargetProperty="Angle" From="0" To="-360" Duration="0:0:1.00" />
+                        </Storyboard>
+                      </BeginStoryboard>
+                    </DataTrigger.EnterActions>
+                    <DataTrigger.ExitActions><StopStoryboard BeginStoryboardName="AgentWorkSpinnerStoryboard" /></DataTrigger.ExitActions>
+                  </DataTrigger>
+                  <DataTrigger Binding="{Binding ShowsCompletedIndicator}" Value="True">
+                    <Setter TargetName="AgentIndicatorSurface" Property="Background" Value="#DDF3E6" />
+                    <Setter TargetName="AgentCount" Property="Visibility" Value="Collapsed" />
+                    <Setter TargetName="AgentCompletedCheck" Property="Visibility" Value="Visible" />
+                    <Setter TargetName="AgentArrow" Property="Visibility" Value="Collapsed" />
+                  </DataTrigger>
+                  <Trigger Property="IsPressed" Value="True"><Setter TargetName="AgentIndicatorSurface" Property="Opacity" Value=".68" /></Trigger>
+                </ControlTemplate.Triggers>
+              </ControlTemplate>
+            </Button.Template>
+          </Button>
+          <Popup x:Name="AgentListPopup" Placement="Bottom" PlacementTarget="{Binding ElementName=AgentIndicatorButton}"
+                 AllowsTransparency="True" StaysOpen="True" PopupAnimation="None" IsOpen="{Binding IsAgentListOpen}" HorizontalOffset="-149" VerticalOffset="-10" Opened="AgentListPopupOpened">
+            <Border Padding="15" Background="Transparent">
+              <Border x:Name="AgentListWrapper" Width="288" MaxHeight="350" Background="Transparent" BorderThickness="0" RenderTransformOrigin="0.5,0">
+                <Border.RenderTransform><TransformGroup><ScaleTransform x:Name="AgentListWrapperScale" /><TranslateTransform x:Name="AgentListWrapperTranslate" /></TransformGroup></Border.RenderTransform>
+                <Border.Effect><DropShadowEffect BlurRadius="12" ShadowDepth="3" Opacity=".28" Color="#151A18" /></Border.Effect>
+                <local:RoundedClipBorder x:Name="AgentListClipSurface" Padding="0" CornerRadius="12" Background="{DynamicResource DetailedSurface}" BorderThickness="0">
+                  <Grid>
+                  <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                    <ItemsControl ItemsSource="{Binding AgentItems}">
+                  <ItemsControl.ItemTemplate>
+                    <DataTemplate>
+                      <StackPanel>
+                        <Grid Margin="15,10,15,1" Visibility="{Binding ShowsProjectSeparator, Converter={StaticResource BooleanToVisibility}}">
+                          <Grid.ColumnDefinitions><ColumnDefinition Width="Auto" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
+                          <TextBlock Text="{Binding SeparatorLabel}" FontSize="9.2" FontWeight="SemiBold" Foreground="{DynamicResource SoftInk}" Opacity=".62" TextTrimming="CharacterEllipsis" MaxWidth="154" />
+                          <Border Grid.Column="1" Height="1" Background="{DynamicResource InputSurface}" Opacity=".65" VerticalAlignment="Center" Margin="8,0,0,0" />
+                        </Grid>
+                        <Button x:Name="AgentRow" Margin="0" Padding="0" Background="Transparent" BorderThickness="0" HorizontalContentAlignment="Stretch" VerticalContentAlignment="Stretch"
+                              MouseEnter="AgentRowMouseEnter" MouseLeave="AgentRowMouseLeave" PreviewMouseLeftButtonDown="AgentRowPreviewMouseLeftButtonDown"
+                              Click="OpenAgentThread" CommandParameter="{Binding ThreadId}" ToolTip="{DynamicResource Loc.OpenAgentChat}" AutomationProperties.Name="{DynamicResource Loc.OpenAgentChat}">
+                        <Button.Template>
+                          <ControlTemplate TargetType="Button">
+                            <Border x:Name="AgentRowSurface" Background="Transparent" BorderThickness="0" CornerRadius="7" ClipToBounds="True">
+                              <Grid>
+                                <Border x:Name="AgentRowHover" Background="#FFFFFF" Opacity="0" IsHitTestVisible="False" />
+                                <Canvas IsHitTestVisible="False" ClipToBounds="True">
+                                  <Ellipse x:Name="AgentRowRipple" Width="2" Height="2" Fill="{DynamicResource Accent}" Opacity="0" RenderTransformOrigin="0.5,0.5">
+                                    <Ellipse.Effect><DropShadowEffect BlurRadius="7" ShadowDepth="0" Opacity=".7" Color="{DynamicResource AccentGlow}" /></Ellipse.Effect>
+                                    <Ellipse.RenderTransform><ScaleTransform x:Name="AgentRowRippleScale" ScaleX="0" ScaleY="0" /></Ellipse.RenderTransform>
+                                  </Ellipse>
+                                </Canvas>
+                                <ContentPresenter Margin="0,8" HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}" VerticalAlignment="{TemplateBinding VerticalContentAlignment}" />
+                              </Grid>
+                            </Border>
+                          </ControlTemplate>
+                        </Button.Template>
+                        <Button.RenderTransform><TranslateTransform x:Name="AgentRowTranslate" /></Button.RenderTransform>
+                        <Border Margin="{Binding Indent}" Padding="15,6">
+                          <Grid>
+                            <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /></Grid.RowDefinitions>
+                            <Grid>
+                              <Grid.ColumnDefinitions><ColumnDefinition Width="Auto" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
+                              <TextBlock x:Name="KindLabel" Text="{Binding Type}" MaxWidth="58" FontSize="9.2" FontWeight="SemiBold" Foreground="{DynamicResource Accent}" TextTrimming="CharacterEllipsis" Margin="0,0,6,0" />
+                              <TextBlock x:Name="ModelLabel" Grid.Column="1" Text="{Binding ModelAndEffort}" FontFamily="./assets/fonts/#Source Sans 3" FontSize="9.2" Foreground="{DynamicResource AgentMetadataAccent}" TextTrimming="CharacterEllipsis" HorizontalAlignment="Left" />
+                            </Grid>
+                            <TextBlock Grid.Row="1" Text="{Binding Title}" FontSize="12" FontWeight="SemiBold" Foreground="{DynamicResource Ink}" TextTrimming="CharacterEllipsis" Margin="0,2.3,0,0" />
+                            <Grid Grid.Row="2" Margin="0,2.3,0,0">
+                              <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                              <TextBlock x:Name="StatusLabel" Text="{Binding Status}" FontSize="10.4" Foreground="{DynamicResource SoftInk}" TextTrimming="CharacterEllipsis" Margin="0,0,10,0" />
+                              <StackPanel x:Name="CompletedStatus" Orientation="Horizontal" Visibility="Collapsed">
+                                <TextBlock Text="{Binding Status}" FontSize="10.4" Foreground="{DynamicResource SoftInk}" Margin="0,0,4,0" />
+                                <Path x:Name="CompletedRowCheck" Width="9" Height="7" Data="M1,4L4,7L9,1" Stretch="Uniform" Stroke="#168A4A" StrokeThickness="1.7" StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round" VerticalAlignment="Center" IsHitTestVisible="False" />
+                              </StackPanel>
+                              <TextBlock x:Name="ReasoningGlow" Text="{Binding Status}" FontSize="10.4" TextTrimming="CharacterEllipsis" IsHitTestVisible="False" Margin="0,0,10,0">
+                                <TextBlock.Foreground>
+                                  <LinearGradientBrush MappingMode="Absolute" StartPoint="0,0.5" EndPoint="64,0.5">
+                                    <LinearGradientBrush.Transform><TranslateTransform x:Name="ReasoningGlowTransform" X="-64" /></LinearGradientBrush.Transform>
+                                    <GradientStop Color="#00FFFFFF" Offset="0.36" />
+                                    <GradientStop Color="#D9F0F2F1" Offset="0.50" />
+                                    <GradientStop Color="#00FFFFFF" Offset="0.64" />
+                                  </LinearGradientBrush>
+                              </TextBlock.Foreground>
+                              </TextBlock>
+                              <Grid Grid.Column="1" HorizontalAlignment="Right" VerticalAlignment="Center">
+                                <TextBlock Text="{Binding Elapsed}" FontFamily="./assets/fonts/#Source Sans 3" FontSize="9.2" Foreground="{DynamicResource SoftInk}" HorizontalAlignment="Right" />
+                              </Grid>
+                            </Grid>
+                          </Grid>
+                        </Border>
+                        </Button>
+                      </StackPanel>
+                      <DataTemplate.Triggers>
+                        <DataTrigger Binding="{Binding IsNew}" Value="True">
+                          <DataTrigger.EnterActions>
+                            <BeginStoryboard>
+                              <Storyboard>
+                                <DoubleAnimation Storyboard.TargetName="AgentRow" Storyboard.TargetProperty="Opacity" From="0" To="1" Duration="0:0:0.18"><DoubleAnimation.EasingFunction><CubicEase EasingMode="EaseOut" /></DoubleAnimation.EasingFunction></DoubleAnimation>
+                                <DoubleAnimation Storyboard.TargetName="AgentRowTranslate" Storyboard.TargetProperty="Y" From="5" To="0" Duration="0:0:0.18"><DoubleAnimation.EasingFunction><CubicEase EasingMode="EaseOut" /></DoubleAnimation.EasingFunction></DoubleAnimation>
+                              </Storyboard>
+                            </BeginStoryboard>
+                          </DataTrigger.EnterActions>
+                        </DataTrigger>
+                        <DataTrigger Binding="{Binding IsWorkAnimationEnabled}" Value="True">
+                          <DataTrigger.EnterActions>
+                            <BeginStoryboard x:Name="ReasoningGlowStoryboard">
+                              <Storyboard RepeatBehavior="Forever">
+                                <DoubleAnimationUsingKeyFrames Storyboard.TargetName="ReasoningGlowTransform" Storyboard.TargetProperty="X">
+                                  <LinearDoubleKeyFrame KeyTime="0:0:0" Value="-64" />
+                                  <LinearDoubleKeyFrame KeyTime="0:0:2.00" Value="268" />
+                                  <DiscreteDoubleKeyFrame KeyTime="0:0:4.00" Value="268" />
+                                </DoubleAnimationUsingKeyFrames>
+                              </Storyboard>
+                            </BeginStoryboard>
+                          </DataTrigger.EnterActions>
+                          <DataTrigger.ExitActions><StopStoryboard BeginStoryboardName="ReasoningGlowStoryboard" /></DataTrigger.ExitActions>
+                        </DataTrigger>
+                          <DataTrigger Binding="{Binding IsClaude}" Value="True">
+                            <Setter TargetName="KindLabel" Property="Foreground" Value="{DynamicResource ClaudeAccent}" />
+                            <Setter TargetName="ModelLabel" Property="Foreground" Value="{DynamicResource ClaudeMetadataAccent}" />
+                          </DataTrigger>
+                          <DataTrigger Binding="{Binding IsCompleted}" Value="True">
+                          <Setter TargetName="StatusLabel" Property="Visibility" Value="Collapsed" />
+                          <Setter TargetName="CompletedStatus" Property="Visibility" Value="Visible" />
+                          <Setter TargetName="ReasoningGlow" Property="Visibility" Value="Collapsed" />
+                        </DataTrigger>
+                      </DataTemplate.Triggers>
+                    </DataTemplate>
+                  </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                  </ScrollViewer>
+                    <Button x:Name="MarkAllCompletedAgentsReadButton" Width="24" Height="24" Padding="4" Margin="0" HorizontalAlignment="Right" VerticalAlignment="Top" Panel.ZIndex="1"
+                            Background="{DynamicResource DetailedSurface}" Click="MarkAllCompletedAgentsRead" ToolTip="{DynamicResource Loc.MarkAllCompletedAgentsRead}" AutomationProperties.Name="{DynamicResource Loc.MarkAllCompletedAgentsRead}"
+                            Visibility="{Binding CanMarkAllCompletedAgentsRead, Converter={StaticResource BooleanToVisibility}}">
+                      <Viewbox Width="14" Height="14"><Canvas Width="24" Height="24"><Path Data="M2,12L7,17L16,8" Stroke="{DynamicResource SoftInk}" StrokeThickness="1.7" StrokeStartLineCap="Round" StrokeEndLineCap="Round" /><Path Data="M8,12L13,17L22,8" Stroke="{DynamicResource SoftInk}" StrokeThickness="1.7" StrokeStartLineCap="Round" StrokeEndLineCap="Round" /></Canvas></Viewbox>
+                    </Button>
+                  </Grid>
+                </local:RoundedClipBorder>
+              </Border>
+            </Border>
+          </Popup>
+        </StackPanel>
+
+        <ScrollViewer x:Name="DetailedScrollViewer" Visibility="{Binding Expanded, Converter={StaticResource BooleanToVisibility}}"
+                      VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Margin="12">
+          <StackPanel x:Name="DetailedContent" LayoutUpdated="DetailedContentLayoutUpdated">
+            <Grid x:Name="DetailedFiveHourQuota" Margin="0,3,0,13" Visibility="{Binding HasFiveHourQuota, Converter={StaticResource BooleanToVisibility}}">
+              <Grid.ColumnDefinitions><ColumnDefinition Width="76" /><ColumnDefinition /></Grid.ColumnDefinitions>
+              <Grid Width="72" Height="72" HorizontalAlignment="Left">
+                <local:CircularQuotaGauge AutomationProperties.Name="5-hour quota remaining indicator" Value="{Binding FiveHourRemainingPercent}"
+                                         TrackBrush="{DynamicResource GaugeTrack}" ProgressBrush="{DynamicResource Accent}" StrokeThickness="4"
+                                         IsWorking="{Binding IsCodexWorkAnimationEnabled}" />
+                <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center">
+                  <TextBlock Text="{Binding FiveHour}" FontFamily="./assets/fonts/#Source Sans 3" FontSize="19.55" FontWeight="Bold" Foreground="{DynamicResource Ink}" HorizontalAlignment="Center" />
+                  <TextBlock Text="5h" FontFamily="./assets/fonts/#Source Sans 3" FontSize="10" FontWeight="SemiBold" Foreground="{DynamicResource SoftInk}" HorizontalAlignment="Center" />
+                </StackPanel>
+              </Grid>
+              <StackPanel Grid.Column="1" VerticalAlignment="Center" Margin="11,0,0,0">
+                <TextBlock Text="{DynamicResource Loc.FiveHourWindow}" FontSize="10" FontWeight="SemiBold" Foreground="{DynamicResource SoftInk}" />
+                <TextBlock Text="{Binding FiveHourReset}" FontFamily="./assets/fonts/#Source Sans 3" FontSize="10" TextWrapping="Wrap" Foreground="{DynamicResource SoftInk}" Margin="0,3,0,0" />
+              </StackPanel>
+            </Grid>
+            <Grid Margin="0,3,0,13">
+              <Grid.ColumnDefinitions><ColumnDefinition Width="76" /><ColumnDefinition /></Grid.ColumnDefinitions>
+              <Grid Width="72" Height="72" HorizontalAlignment="Left">
+                <local:CircularQuotaGauge AutomationProperties.Name="{DynamicResource Loc.WeeklyQuotaIndicator}" Value="{Binding RemainingPercent}"
+                                         TrackBrush="{DynamicResource GaugeTrack}" ProgressBrush="{DynamicResource Accent}" StrokeThickness="4"
+                                         IsWorking="{Binding IsCodexWorkAnimationEnabled}" />
+                <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center">
+                  <TextBlock Text="{Binding Weekly}" FontFamily="./assets/fonts/#Source Sans 3" FontSize="19.55" FontWeight="Bold" Foreground="{DynamicResource Ink}" HorizontalAlignment="Center" />
+                  <TextBlock Text="7d" FontFamily="./assets/fonts/#Source Sans 3" FontSize="10" FontWeight="SemiBold" Foreground="{DynamicResource SoftInk}" HorizontalAlignment="Center" />
+                </StackPanel>
+              </Grid>
+              <StackPanel Grid.Column="1" VerticalAlignment="Center" Margin="11,0,0,0">
+                <TextBlock Text="{DynamicResource Loc.Weekly}" FontSize="10" FontWeight="SemiBold" Foreground="{DynamicResource SoftInk}" />
+                <TextBlock Text="{Binding Reset}" FontFamily="./assets/fonts/#Source Sans 3" FontSize="10" TextWrapping="Wrap" Foreground="{DynamicResource SoftInk}" Margin="0,3,0,0" />
+                <TextBlock Text="{Binding Forecast}" FontFamily="./assets/fonts/#Source Sans 3" FontSize="10" TextWrapping="Wrap" Margin="0,3,0,0">
+                  <TextBlock.Style>
+                    <Style TargetType="TextBlock">
+                      <Setter Property="Foreground" Value="{DynamicResource SoftInk}" />
+                      <Setter Property="FontWeight" Value="Normal" />
+                      <Style.Triggers>
+                        <DataTrigger Binding="{Binding IsExhaustionRisk}" Value="True">
+                          <Setter Property="Foreground" Value="{DynamicResource RiskWarning}" />
+                          <Setter Property="FontWeight" Value="Bold" />
+                        </DataTrigger>
+                      </Style.Triggers>
+                    </Style>
+                  </TextBlock.Style>
+                </TextBlock>
+              </StackPanel>
+            </Grid>
+
+            <Expander x:Name="ConsumptionDetails" Header="{DynamicResource Loc.ConsumptionDetails}" AutomationProperties.Name="{DynamicResource Loc.ConsumptionDetails}"
+                      Style="{StaticResource ConsumptionDetailsExpander}" IsExpanded="False" Margin="0,0,0,4">
+              <StackPanel>
+                <Grid Margin="0,0,0,8">
+                  <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="1" /><ColumnDefinition Width="*" /><ColumnDefinition Width="1" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
+                  <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="16" /></Grid.RowDefinitions>
+                  <TextBlock Text="{DynamicResource Loc.TodayUpper}" FontSize="8" Foreground="{DynamicResource SoftInk}" />
+                  <TextBlock Grid.Column="2" Text="{DynamicResource Loc.WeekUpper}" FontSize="8" Foreground="{DynamicResource SoftInk}" Margin="7,0" />
+                  <TextBlock Grid.Column="4" Text="{DynamicResource Loc.MonthUpper}" FontSize="8" Foreground="{DynamicResource SoftInk}" Margin="7,0,0,0" />
+                  <TextBlock Grid.Row="1" Text="{Binding Today}" FontFamily="./assets/fonts/#Source Sans 3" FontSize="14" FontWeight="SemiBold" Foreground="{DynamicResource Ink}" TextTrimming="CharacterEllipsis" />
+                  <TextBlock Grid.Row="1" Grid.Column="2" Text="{Binding WeeklyTokens}" FontFamily="./assets/fonts/#Source Sans 3" FontSize="14" FontWeight="SemiBold" Foreground="{DynamicResource Ink}" Margin="7,0" TextTrimming="CharacterEllipsis" />
+                  <TextBlock Grid.Row="1" Grid.Column="4" Text="{Binding Month}" FontFamily="./assets/fonts/#Source Sans 3" FontSize="14" FontWeight="SemiBold" Foreground="{DynamicResource Ink}" Margin="7,0,0,0" TextTrimming="CharacterEllipsis" />
+                  <TextBlock Grid.Row="2" Text="{Binding TodayCost}" FontFamily="./assets/fonts/#Source Sans 3" FontSize="9" Foreground="{DynamicResource SoftInk}" Margin="0,1,0,0" TextTrimming="CharacterEllipsis" />
+                  <TextBlock Grid.Row="2" Grid.Column="2" Text="{Binding WeeklyCost}" FontFamily="./assets/fonts/#Source Sans 3" FontSize="9" Foreground="{DynamicResource SoftInk}" Margin="7,1" TextTrimming="CharacterEllipsis" />
+                  <TextBlock Grid.Row="2" Grid.Column="4" Text="{Binding MonthCost}" FontFamily="./assets/fonts/#Source Sans 3" FontSize="9" Foreground="{DynamicResource SoftInk}" Margin="7,1,0,0" TextTrimming="CharacterEllipsis" />
+                  <Border Grid.Column="1" Grid.RowSpan="3" Width="1" Background="{DynamicResource GaugeTrack}" Margin="0,2,0,1" />
+                  <Border Grid.Column="3" Grid.RowSpan="3" Width="1" Background="{DynamicResource GaugeTrack}" Margin="0,2,0,1" />
+                </Grid>
+                <TextBlock Text="{Binding Coverage}" FontFamily="./assets/fonts/#Source Sans 3" FontSize="10" Foreground="{DynamicResource SoftInk}" Margin="0,4,0,12" />
+                <Grid Margin="0,10,0,3">
+                  <TextBlock Text="{DynamicResource Loc.UsageRanking}" FontSize="10" FontWeight="SemiBold" Foreground="{DynamicResource Ink}" VerticalAlignment="Center" />
+                  <Grid HorizontalAlignment="Right" Height="24" Width="144">
+                    <Grid.ColumnDefinitions><ColumnDefinition /><ColumnDefinition /><ColumnDefinition /></Grid.ColumnDefinitions>
+                    <Border Background="{DynamicResource InputSurface}" CornerRadius="12" Grid.ColumnSpan="3" />
+                    <Border Background="{DynamicResource Sage}" CornerRadius="10" Margin="2">
+                      <Border.Style>
+                        <Style TargetType="Border">
+                          <Setter Property="Grid.Column" Value="2" />
+                          <Style.Triggers>
+                            <DataTrigger Binding="{Binding IsRankingDay}" Value="True"><Setter Property="Grid.Column" Value="0" /></DataTrigger>
+                            <DataTrigger Binding="{Binding IsRankingWeek}" Value="True"><Setter Property="Grid.Column" Value="1" /></DataTrigger>
+                          </Style.Triggers>
+                        </Style>
+                      </Border.Style>
+                    </Border>
+                    <Grid Grid.ColumnSpan="3">
+                      <Grid.Resources>
+                        <Style TargetType="RadioButton">
+                          <Setter Property="Background" Value="Transparent" />
+                          <Setter Property="Cursor" Value="Hand" />
+                          <Setter Property="FontSize" Value="9" />
+                          <Setter Property="HorizontalContentAlignment" Value="Center" />
+                          <Setter Property="VerticalContentAlignment" Value="Center" />
+                          <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="RadioButton"><Border Background="{TemplateBinding Background}" CornerRadius="10"><ContentPresenter HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}" VerticalAlignment="{TemplateBinding VerticalContentAlignment}" /></Border></ControlTemplate></Setter.Value></Setter>
+                        </Style>
+                      </Grid.Resources>
+                      <Grid.ColumnDefinitions><ColumnDefinition /><ColumnDefinition /><ColumnDefinition /></Grid.ColumnDefinitions>
+                      <RadioButton Grid.Column="0" GroupName="RankingPeriod" Content="{DynamicResource Loc.Day}" IsChecked="{Binding IsRankingDay, Mode=TwoWay}" Foreground="{DynamicResource Ink}" AutomationProperties.Name="{DynamicResource Loc.RankingPeriodDay}" />
+                      <RadioButton Grid.Column="1" GroupName="RankingPeriod" Content="{DynamicResource Loc.Week}" IsChecked="{Binding IsRankingWeek, Mode=TwoWay}" Foreground="{DynamicResource Ink}" AutomationProperties.Name="{DynamicResource Loc.RankingPeriodWeek}" />
+                      <RadioButton Grid.Column="2" GroupName="RankingPeriod" Content="{DynamicResource Loc.Month}" IsChecked="{Binding IsRankingMonth, Mode=TwoWay}" Foreground="{DynamicResource Ink}" AutomationProperties.Name="{DynamicResource Loc.RankingPeriodMonth}" />
+                    </Grid>
+                  </Grid>
+                </Grid>
+                <ItemsControl ItemsSource="{Binding Ranking}" Margin="0,0,0,0">
+                  <ItemsControl.ItemTemplate><DataTemplate><StackPanel Margin="0,3" ToolTipService.InitialShowDelay="0" ToolTipService.BetweenShowDelay="0"><StackPanel.ToolTip><ToolTip Content="{Binding TooltipData}" Style="{StaticResource TokenUsageToolTip}" /></StackPanel.ToolTip><Grid><Grid.ColumnDefinitions><ColumnDefinition /><ColumnDefinition Width="72" /></Grid.ColumnDefinitions><TextBlock Text="{Binding Model}" FontSize="11" Foreground="{DynamicResource Ink}" TextTrimming="CharacterEllipsis" /><StackPanel Grid.Column="1" HorizontalAlignment="Right"><TextBlock Text="{Binding Tokens}" FontFamily="./assets/fonts/#Source Sans 3" FontSize="10" Foreground="{DynamicResource Ink}" HorizontalAlignment="Right" /><TextBlock Text="{Binding SecondaryText}" FontFamily="./assets/fonts/#Source Sans 3" FontSize="8" Foreground="{DynamicResource SoftInk}" HorizontalAlignment="Right" /></StackPanel></Grid><ProgressBar Value="{Binding Fraction}" Maximum="1" Height="4" Background="{DynamicResource Sage}" Foreground="{DynamicResource Accent}" /></StackPanel></DataTemplate></ItemsControl.ItemTemplate>
+                </ItemsControl>
+                <StackPanel Margin="0,13,0,0">
+                  <TextBlock Text="{DynamicResource Loc.DailyUsageCurrentMonth}" FontSize="9" Foreground="{DynamicResource SoftInk}" Margin="0,0,0,5" />
+                  <local:DailyUsageChart x:Name="DailyChart" Series="{Binding DailyTokenSeries}" QuotaSeries="{Binding DailyQuotaSeries}" Height="96"
+                                         CurrencyCode="{Binding CurrencyCode}"
+                                         BarBrush="{DynamicResource Accent}" TrackBrush="{DynamicResource GaugeTrack}"
+                                         QuotaBrush="{DynamicResource Ink}"
+                                         InitialQuotaBrush="{DynamicResource Accent}"
+                                         LabelBrush="{DynamicResource SoftInk}" TooltipSurface="{DynamicResource InputSurface}"
+                                         TooltipTextBrush="{DynamicResource Ink}" />
+                  <StackPanel Orientation="Horizontal" Margin="23,3,0,0" Height="14">
+                    <Line X1="0" X2="12" Y1="1" Y2="1" Stroke="{DynamicResource Accent}" StrokeThickness="1.25" StrokeDashArray="3,2" VerticalAlignment="Center" Margin="0,0,4,0" />
+                    <TextBlock Text="{DynamicResource Loc.WeeklyQuotaInitial}" FontFamily="./assets/fonts/#Source Sans 3" FontSize="8" Foreground="{DynamicResource SoftInk}" Margin="0,0,10,0" />
+                    <Rectangle Width="12" Height="2" Fill="{DynamicResource Ink}" VerticalAlignment="Center" Margin="0,0,4,0" />
+                    <TextBlock Text="{DynamicResource Loc.WeeklyQuotaRemainingShort}" FontFamily="./assets/fonts/#Source Sans 3" FontSize="8" Foreground="{DynamicResource SoftInk}" />
+                  </StackPanel>
+                  <Button Click="OpenChatDetails" Content="{DynamicResource Loc.DetailsByChat}" HorizontalAlignment="Left" Padding="8,4" Margin="0,7,0,0"
+                          FontSize="10" FontWeight="SemiBold" Foreground="{DynamicResource Ink}" Background="{DynamicResource InputSurface}" />
+                </StackPanel>
+              </StackPanel>
+            </Expander>
+            <Border x:Name="ClaudeDetailBlock" Margin="0,12,0,0" Visibility="{Binding ClaudeProfileEnabled, Converter={StaticResource BooleanToVisibility}}">
+              <StackPanel>
+                <TextBlock Text="Claude" FontWeight="SemiBold" Foreground="{Binding ClaudeBrush}" />
+                <TextBlock Text="{Binding ClaudeDetailStatus}" TextWrapping="Wrap" Foreground="{DynamicResource SoftInk}" FontSize="10" Margin="0,3,0,6" />
+                <Grid x:Name="DetailedClaudeFiveHourQuota" Margin="0,3,0,13">
+                  <Grid.ColumnDefinitions><ColumnDefinition Width="76" /><ColumnDefinition /></Grid.ColumnDefinitions>
+                  <Grid Width="72" Height="72" HorizontalAlignment="Left">
+                    <local:CircularQuotaGauge AutomationProperties.Name="{Binding ClaudeFiveHourAccessibleName}" Value="{Binding ClaudeFiveHourRemainingPercent}" TrackBrush="{DynamicResource GaugeTrack}" ProgressBrush="{Binding ClaudeBrush}" StrokeThickness="4" IsWorking="{Binding IsClaudeWorkAnimationEnabled}" />
+                    <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center">
+                      <TextBlock Text="{Binding ClaudeFiveHour}" FontFamily="./assets/fonts/#Source Sans 3" FontSize="19.55" FontWeight="Bold" Foreground="{DynamicResource Ink}" HorizontalAlignment="Center" />
+                      <TextBlock Text="5h" FontFamily="./assets/fonts/#Source Sans 3" FontSize="10" FontWeight="SemiBold" Foreground="{DynamicResource SoftInk}" HorizontalAlignment="Center" />
+                    </StackPanel>
+                  </Grid>
+                  <StackPanel Grid.Column="1" VerticalAlignment="Center" Margin="11,0,0,0">
+                    <TextBlock Text="{DynamicResource Loc.FiveHourWindow}" FontSize="10" FontWeight="SemiBold" Foreground="{DynamicResource SoftInk}" />
+                    <TextBlock Text="{Binding ClaudeFiveHourReset}" FontFamily="./assets/fonts/#Source Sans 3" TextWrapping="Wrap" FontSize="10" Foreground="{DynamicResource SoftInk}" Margin="0,3,0,0" />
+                  </StackPanel>
+                </Grid>
+                <Grid x:Name="DetailedClaudeWeeklyQuota" Margin="0,3,0,13">
+                  <Grid.ColumnDefinitions><ColumnDefinition Width="76" /><ColumnDefinition /></Grid.ColumnDefinitions>
+                  <Grid Width="72" Height="72" HorizontalAlignment="Left">
+                    <local:CircularQuotaGauge AutomationProperties.Name="{Binding ClaudeWeeklyAccessibleName}" Value="{Binding ClaudeWeeklyRemainingPercent}" TrackBrush="{DynamicResource GaugeTrack}" ProgressBrush="{Binding ClaudeBrush}" StrokeThickness="4" IsWorking="{Binding IsClaudeWorkAnimationEnabled}" />
+                    <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center">
+                      <TextBlock Text="{Binding ClaudeWeekly}" FontFamily="./assets/fonts/#Source Sans 3" FontSize="19.55" FontWeight="Bold" Foreground="{DynamicResource Ink}" HorizontalAlignment="Center" />
+                      <TextBlock Text="7d" FontFamily="./assets/fonts/#Source Sans 3" FontSize="10" FontWeight="SemiBold" Foreground="{DynamicResource SoftInk}" HorizontalAlignment="Center" />
+                    </StackPanel>
+                  </Grid>
+                  <StackPanel Grid.Column="1" VerticalAlignment="Center" Margin="11,0,0,0">
+                    <TextBlock Text="{DynamicResource Loc.Weekly}" FontSize="10" FontWeight="SemiBold" Foreground="{DynamicResource SoftInk}" />
+                    <TextBlock Text="{Binding ClaudeWeeklyReset}" FontFamily="./assets/fonts/#Source Sans 3" TextWrapping="Wrap" FontSize="10" Foreground="{DynamicResource SoftInk}" Margin="0,3,0,0" />
+                  </StackPanel>
+                </Grid>
+              </StackPanel>
+            </Border>
+            <TextBlock Text="{Binding AppVersion}" FontFamily="./assets/fonts/#Source Sans 3" FontSize="12" Foreground="{DynamicResource SoftInk}" HorizontalAlignment="Center" Margin="0,7,0,0" />
+          </StackPanel>
+        </ScrollViewer>
+
+        <Grid x:Name="Chrome" Panel.ZIndex="2" VerticalAlignment="Top" HorizontalAlignment="Right" Opacity="0"
+              Visibility="{Binding Expanded, Converter={StaticResource BooleanToVisibility}}">
+          <Grid.ColumnDefinitions><ColumnDefinition Width="Auto" /><ColumnDefinition Width="Auto" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+          <Button Grid.Column="0" Click="Settings" ToolTip="{DynamicResource Loc.Settings}" AutomationProperties.Name="{DynamicResource Loc.Settings}" Padding="5"><Viewbox Width="15" Height="15"><Canvas Width="24" Height="24"><Path Data="M12.22,2H11.78A2,2 0 0,0 9.78,4V4.18A2,2 0 0,1 8.78,5.91L8.35,6.16A2,2 0 0,1 6.35,6.16L6.2,6.08A2,2 0 0,0 3.47,6.81L3.25,7.19A2,2 0 0,0 3.98,9.92L4.13,10.02A2,2 0 0,1 5.13,11.74V12.25A2,2 0 0,1 4.13,13.99L3.98,14.08A2,2 0 0,0 3.25,16.81L3.47,17.19A2,2 0 0,0 6.2,17.92L6.35,17.84A2,2 0 0,1 8.35,17.84L8.78,18.09A2,2 0 0,1 9.78,19.82V20A2,2 0 0,0 11.78,22H12.22A2,2 0 0,0 14.22,20V19.82A2,2 0 0,1 15.22,18.09L15.65,17.84A2,2 0 0,1 17.65,17.84L17.8,17.92A2,2 0 0,0 20.53,17.19L20.75,16.81A2,2 0 0,0 20.02,14.08L19.87,13.99A2,2 0 0,1 18.87,12.25V11.74A2,2 0 0,1 19.87,10L20.02,9.91A2,2 0 0,0 20.75,7.18L20.53,6.8A2,2 0 0,0 17.8,6.07L17.65,6.15A2,2 0 0,1 15.65,6.15L15.22,5.9A2,2 0 0,1 14.22,4.17V4A2,2 0 0,0 12.22,2Z" Stroke="{DynamicResource SoftInk}" StrokeThickness="1.4" /><Ellipse Canvas.Left="9" Canvas.Top="9" Width="6" Height="6" Stroke="{DynamicResource SoftInk}" StrokeThickness="1.4" /></Canvas></Viewbox></Button>
+          <Button Grid.Column="1" Click="ToggleDetailed" ToolTip="{DynamicResource Loc.ToggleDetailedMode}" AutomationProperties.Name="{DynamicResource Loc.ToggleDetailedMode}" Padding="5"><Viewbox Width="15" Height="15"><Canvas Width="24" Height="24"><Path Data="M5,7H19M5,12H19M5,17H19" Stroke="{DynamicResource SoftInk}" StrokeThickness="1.7" StrokeStartLineCap="Round" /></Canvas></Viewbox></Button>
+          <Button Grid.Column="2" Click="CloseWindow" ToolTip="{DynamicResource Loc.Hide}" AutomationProperties.Name="{DynamicResource Loc.Hide}" Padding="5"><Viewbox Width="15" Height="15"><Canvas Width="24" Height="24"><Path Data="M18,6L6,18M6,6L18,18" Stroke="{DynamicResource SoftInk}" StrokeThickness="1.7" StrokeStartLineCap="Round" StrokeEndLineCap="Round" /></Canvas></Viewbox></Button>
+        </Grid>
+      </Grid>
+
+        <Grid x:Name="SettingsPanel" Visibility="Collapsed" Background="{DynamicResource SettingsSurface}" Panel.ZIndex="3"
+              HorizontalAlignment="Stretch" VerticalAlignment="Stretch">
+          <Border Background="{DynamicResource SettingsSurface}" CornerRadius="12" ClipToBounds="True">
+            <Grid>
+              <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="*" /><RowDefinition Height="Auto" /></Grid.RowDefinitions>
+              <Grid Margin="16,12,10,10">
+                <TextBlock Text="{DynamicResource Loc.Settings}" FontSize="17" FontWeight="SemiBold" Foreground="{DynamicResource Ink}" VerticalAlignment="Center" />
+                <Button HorizontalAlignment="Right" Click="Settings" ToolTip="{DynamicResource Loc.CloseSettings}" AutomationProperties.Name="{DynamicResource Loc.CloseSettings}" Padding="5"><Viewbox Width="15" Height="15"><Canvas Width="24" Height="24"><Path Data="M18,6L6,18M6,6L18,18" Stroke="{DynamicResource SoftInk}" StrokeThickness="1.7" StrokeStartLineCap="Round" StrokeEndLineCap="Round" /></Canvas></Viewbox></Button>
+              </Grid>
+              <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Margin="12,0,4,0">
+                <StackPanel Margin="0,0,6,2">
+
+                  <!-- General: widget behavior and appearance shared by every profile. -->
+                  <Border Style="{StaticResource SettingsCard}">
+                    <StackPanel>
+                      <TextBlock Text="{DynamicResource Loc.SettingsGeneral}" Style="{StaticResource SettingsSectionTitle}" Margin="0,0,0,8" />
+                      <Grid Margin="0,4">
+                        <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                        <TextBlock Text="{DynamicResource Loc.DetailedMode}" Style="{StaticResource SettingsRowLabel}" />
+                        <CheckBox x:Name="DetailedBox" Grid.Column="1" Style="{StaticResource ThemeSwitch}" AutomationProperties.Name="{DynamicResource Loc.DetailedMode}" />
+                      </Grid>
+                      <Grid Margin="0,4">
+                        <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                        <TextBlock Text="{DynamicResource Loc.AlwaysOnTop}" Style="{StaticResource SettingsRowLabel}" />
+                        <CheckBox x:Name="TopmostBox" Grid.Column="1" Style="{StaticResource ThemeSwitch}" AutomationProperties.Name="{DynamicResource Loc.AlwaysOnTop}" />
+                      </Grid>
+                      <Grid Margin="0,4">
+                        <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                        <TextBlock Text="{DynamicResource Loc.DarkTheme}" Style="{StaticResource SettingsRowLabel}" />
+                        <CheckBox x:Name="ThemeToggle" Grid.Column="1" Style="{StaticResource ThemeSwitch}" AutomationProperties.Name="{DynamicResource Loc.DarkTheme}" ToolTip="{DynamicResource Loc.ToggleTheme}" Checked="PreviewTheme" Unchecked="PreviewTheme" />
+                      </Grid>
+                      <Border Style="{StaticResource SettingsDivider}" />
+                      <TextBlock Text="{DynamicResource Loc.Language}" Style="{StaticResource SettingsLabelStyle}" Margin="0,0,0,4" />
+                      <ComboBox x:Name="LanguageBox" SelectionChanged="PreviewLanguage" AutomationProperties.Name="{DynamicResource Loc.Language}"><ComboBoxItem Tag="pt-BR">Português (Brasil)</ComboBoxItem><ComboBoxItem Tag="en-US">English (United States)</ComboBoxItem></ComboBox>
+                      <TextBlock Text="{DynamicResource Loc.Currency}" Style="{StaticResource SettingsLabelStyle}" Margin="0,12,0,4" />
+                      <ComboBox x:Name="CurrencyBox" SelectionChanged="CurrencyChanged" AutomationProperties.Name="{DynamicResource Loc.Currency}"><ComboBoxItem Tag="BRL">BRL (R$)</ComboBoxItem><ComboBoxItem Tag="USD">USD (US$)</ComboBoxItem></ComboBox>
+                      <StackPanel x:Name="RatePanel"><TextBlock Text="{DynamicResource Loc.UsdBrlRate}" Style="{StaticResource SettingsLabelStyle}" Margin="0,12,0,4" /><TextBox x:Name="RateBox" FontFamily="./assets/fonts/#Source Sans 3" AutomationProperties.Name="{DynamicResource Loc.UsdBrlRate}" /></StackPanel>
+                      <TextBlock Text="{DynamicResource Loc.CompactQuota}" Style="{StaticResource SettingsLabelStyle}" Margin="0,12,0,4" />
+                      <ComboBox x:Name="CompactQuotaBox" AutomationProperties.Name="{DynamicResource Loc.CompactQuota}"><ComboBoxItem Tag="5h">5h</ComboBoxItem><ComboBoxItem Tag="7d">7d</ComboBoxItem><ComboBoxItem Tag="both">5h + 7d</ComboBoxItem></ComboBox>
+                    </StackPanel>
+                  </Border>
+
+                  <!-- Codex profile. -->
+                  <Border Style="{StaticResource SettingsCard}">
+                    <StackPanel>
+                      <Grid Margin="0,0,0,8">
+                        <Grid.ColumnDefinitions><ColumnDefinition Width="Auto" /><ColumnDefinition Width="Auto" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
+                        <Ellipse Width="8" Height="8" Fill="{DynamicResource Accent}" VerticalAlignment="Center" Margin="0,0,8,0" />
+                        <TextBlock Grid.Column="1" Text="Codex" Style="{StaticResource SettingsSectionTitle}" />
+                        <TextBlock Grid.Column="2" Text="{Binding Status}" FontSize="10.5" Foreground="{DynamicResource SoftInk}" HorizontalAlignment="Right" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" Margin="10,0,0,0" />
+                      </Grid>
+                      <TextBlock Text="{DynamicResource Loc.ProfileColor}" Style="{StaticResource SettingsLabelStyle}" Margin="0,0,0,4" />
+                      <Button x:Name="AccentColorButton" Click="ChooseAccentColor" Style="{StaticResource FieldButton}" ToolTip="{DynamicResource Loc.ChooseAccentColorTooltip}" AutomationProperties.Name="{DynamicResource Loc.ChooseAccentColor}">
+                        <Grid>
+                          <Grid.ColumnDefinitions><ColumnDefinition Width="Auto" /><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                          <Ellipse x:Name="AccentColorSwatch" Width="16" Height="16" Fill="{DynamicResource Accent}" VerticalAlignment="Center" Margin="0,0,10,0" />
+                          <TextBlock x:Name="AccentColorValue" Grid.Column="1" FontFamily="./assets/fonts/#Source Sans 3" FontSize="12" FontWeight="SemiBold" Foreground="{DynamicResource Ink}" VerticalAlignment="Center" HorizontalAlignment="Left" />
+                          <Viewbox Grid.Column="2" Width="16" Height="16" VerticalAlignment="Center" Margin="8,0,2,0"><Canvas Width="24" Height="24"><Path Data="M12,9L3,18V21H6L15,12M9,6L18,15M12,9L18,3A2.12,2.12 0 0 1 21,6L15,12" Stroke="{DynamicResource SoftInk}" StrokeThickness="1.7" StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round" /></Canvas></Viewbox>
+                        </Grid>
+                      </Button>
+                      <StackPanel x:Name="CodexPathFallbackPanel" Visibility="Collapsed">
+                        <TextBlock Text="{DynamicResource Loc.CodexPath}" Style="{StaticResource SettingsLabelStyle}" Margin="0,12,0,4" />
+                        <Grid>
+                          <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                          <TextBox x:Name="PathBox" AutomationProperties.Name="{DynamicResource Loc.CodexPath}" />
+                          <Button Grid.Column="1" Click="Browse" Content="{DynamicResource Loc.Browse}" Style="{StaticResource SecondaryButton}" MinHeight="34" Margin="6,0,0,0" />
+                        </Grid>
+                      </StackPanel>
+                    </StackPanel>
+                  </Border>
+
+                  <!-- Claude profile: one status indicator and only the actions valid for that status. -->
+                  <Border Style="{StaticResource SettingsCard}">
+                    <StackPanel>
+                      <Grid Margin="0,0,0,6">
+                        <Grid.ColumnDefinitions><ColumnDefinition Width="Auto" /><ColumnDefinition Width="Auto" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
+                        <Ellipse Width="8" Height="8" Fill="{DynamicResource ClaudeAccent}" VerticalAlignment="Center" Margin="0,0,8,0" />
+                        <TextBlock Grid.Column="1" Text="Claude" Style="{StaticResource SettingsSectionTitle}" />
+                        <Border x:Name="ClaudeStatusPill" Grid.Column="2" HorizontalAlignment="Right" VerticalAlignment="Center" CornerRadius="10" Padding="8,2,9,3" Background="{DynamicResource InputSurface}">
+                          <StackPanel Orientation="Horizontal">
+                            <Ellipse Width="6" Height="6" VerticalAlignment="Center" Margin="0,1,6,0">
+                              <Ellipse.Style>
+                                <Style TargetType="Ellipse">
+                                  <Setter Property="Fill" Value="{DynamicResource SoftInk}" />
+                                  <Style.Triggers>
+                                    <DataTrigger Binding="{Binding IsClaudeConnected}" Value="True"><Setter Property="Fill" Value="#1E9E5A" /></DataTrigger>
+                                    <DataTrigger Binding="{Binding IsClaudeReconnectRequired}" Value="True"><Setter Property="Fill" Value="{DynamicResource RiskWarning}" /></DataTrigger>
+                                  </Style.Triggers>
+                                </Style>
+                              </Ellipse.Style>
+                            </Ellipse>
+                            <TextBlock Text="{Binding ClaudeStatus}" FontSize="10.5" FontWeight="SemiBold" Foreground="{DynamicResource Ink}" VerticalAlignment="Center" />
+                          </StackPanel>
+                        </Border>
+                      </Grid>
+                      <TextBlock Text="{Binding ClaudeConnectionHint}" Style="{StaticResource SettingsHint}" Margin="0,0,0,10" />
+                      <StackPanel Visibility="{Binding ShowClaudeConnectActions, Converter={StaticResource BooleanToVisibility}}">
+                        <Button x:Name="ClaudeConnectButton" Click="ConnectClaude" Content="{Binding ClaudeConnectLabel}" Style="{StaticResource PrimaryButton}" Background="{DynamicResource ClaudeAccent}" Foreground="{DynamicResource OnClaudeAccent}" HorizontalAlignment="Stretch" />
+                        <Button x:Name="ClaudeManualButton" Click="ConnectClaudeWithCode" Content="{DynamicResource Loc.ClaudeConnectCode}" Style="{StaticResource GhostButton}" Foreground="{DynamicResource ClaudeAccent}" Margin="-8,4,0,0" />
+                      </StackPanel>
+                      <Button x:Name="ClaudeDisconnectButton" Click="DisconnectClaude" Content="{DynamicResource Loc.ClaudeDisconnect}" Style="{StaticResource DangerButton}" Margin="0,0,0,2" Visibility="{Binding ShowClaudeDisconnect, Converter={StaticResource BooleanToVisibility}}" />
+                      <StackPanel x:Name="ClaudeManualPanel" Visibility="{Binding IsClaudeManualEntryOpen, Converter={StaticResource BooleanToVisibility}}">
+                        <TextBlock Text="{DynamicResource Loc.ClaudePasteCode}" Style="{StaticResource SettingsLabelStyle}" TextWrapping="Wrap" Margin="0,0,0,4" />
+                        <Grid>
+                          <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                          <TextBox x:Name="ClaudeCodeBox" AutomationProperties.Name="{DynamicResource Loc.ClaudePasteCode}" />
+                          <Button x:Name="ClaudeSubmitButton" Grid.Column="1" Click="SubmitClaudeCode" Content="{DynamicResource Loc.ClaudeSubmitCode}" Style="{StaticResource PrimaryButton}" Background="{DynamicResource ClaudeAccent}" Foreground="{DynamicResource OnClaudeAccent}" MinHeight="34" Margin="6,0,0,0" />
+                        </Grid>
+                      </StackPanel>
+                      <TextBlock x:Name="ClaudeLoginFeedback" Text="" Style="{StaticResource SettingsHint}" Margin="0,8,0,0" />
+                      <Button x:Name="ClaudeCancelButton" Click="CancelClaudeConnection" Content="{DynamicResource Loc.Cancel}" Style="{StaticResource SecondaryButton}" Margin="0,8,0,0" Visibility="{Binding ShowClaudeCancel, Converter={StaticResource BooleanToVisibility}}" />
+                      <Border Style="{StaticResource SettingsDivider}" />
+                      <Grid Margin="0,0,0,8">
+                        <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                        <TextBlock Text="{DynamicResource Loc.ShowClaudeProfile}" Style="{StaticResource SettingsRowLabel}" />
+                        <CheckBox x:Name="ClaudeEnabledBox" Grid.Column="1" Style="{StaticResource ThemeSwitch}" AutomationProperties.Name="{DynamicResource Loc.ShowClaudeProfile}" />
+                      </Grid>
+                      <TextBlock Text="{DynamicResource Loc.ProfileColor}" Style="{StaticResource SettingsLabelStyle}" Margin="0,0,0,4" />
+                      <Button Click="ChooseClaudeAccentColor" Style="{StaticResource FieldButton}" ToolTip="{DynamicResource Loc.ClaudeAccentColor}" AutomationProperties.Name="{DynamicResource Loc.ClaudeAccentColor}">
+                        <Grid>
+                          <Grid.ColumnDefinitions><ColumnDefinition Width="Auto" /><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                          <Ellipse x:Name="ClaudeAccentSwatch" Width="16" Height="16" VerticalAlignment="Center" Margin="0,0,10,0" />
+                          <TextBlock x:Name="ClaudeAccentValue" Grid.Column="1" FontFamily="./assets/fonts/#Source Sans 3" FontSize="12" FontWeight="SemiBold" Foreground="{DynamicResource Ink}" VerticalAlignment="Center" HorizontalAlignment="Left" />
+                          <Viewbox Grid.Column="2" Width="16" Height="16" VerticalAlignment="Center" Margin="8,0,2,0"><Canvas Width="24" Height="24"><Path Data="M12,9L3,18V21H6L15,12M9,6L18,15M12,9L18,3A2.12,2.12 0 0 1 21,6L15,12" Stroke="{DynamicResource SoftInk}" StrokeThickness="1.7" StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round" /></Canvas></Viewbox>
+                        </Grid>
+                      </Button>
+                    </StackPanel>
+                  </Border>
+
+                  <!-- About: version, updates and diagnostics. -->
+                  <Border Style="{StaticResource SettingsCard}">
+                    <StackPanel>
+                      <TextBlock Text="{DynamicResource Loc.SettingsAbout}" Style="{StaticResource SettingsSectionTitle}" Margin="0,0,0,8" />
+                      <Grid Margin="0,0,0,10">
+                        <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                        <StackPanel>
+                          <TextBlock Text="{DynamicResource Loc.AppTitle}" FontSize="12" FontWeight="SemiBold" Foreground="{DynamicResource Ink}" />
+                          <TextBlock Text="{DynamicResource Loc.AppTagline}" FontSize="10.5" Foreground="{DynamicResource SoftInk}" />
+                        </StackPanel>
+                        <TextBlock Grid.Column="1" Text="{Binding AppVersion}" FontFamily="./assets/fonts/#Source Sans 3" FontSize="12" Foreground="{DynamicResource SoftInk}" VerticalAlignment="Center" />
+                      </Grid>
+                      <WrapPanel>
+                        <Button x:Name="CheckForUpdatesButton" Click="CheckForUpdatesManual" Content="{DynamicResource Loc.CheckForUpdates}" Style="{StaticResource SecondaryButton}" Margin="0,0,6,0" />
+                        <Button Click="OpenLog" Content="{DynamicResource Loc.OpenLog}" Style="{StaticResource GhostButton}" />
+                      </WrapPanel>
+                      <TextBlock Text="{Binding UpdateCheckFeedback}" Style="{StaticResource SettingsHint}" FontFamily="./assets/fonts/#Source Sans 3" Margin="0,8,0,0" />
+                    </StackPanel>
+                  </Border>
+                </StackPanel>
+              </ScrollViewer>
+              <Border Grid.Row="2" Padding="12,10,12,12">
+                <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+                  <Button Click="Settings" Content="{DynamicResource Loc.Cancel}" Style="{StaticResource SecondaryButton}" Margin="0,0,8,0" />
+                  <Button Click="ApplySettings" Content="{DynamicResource Loc.Apply}" Style="{StaticResource PrimaryButton}" />
+                </StackPanel>
+              </Border>
+            </Grid>
+          </Border>
+        </Grid>
+
+        <Grid x:Name="UpdateDialogPanel" Visibility="{Binding IsUpdateDialogOpen, Converter={StaticResource BooleanToVisibility}}" Background="{DynamicResource DetailedSurface}" Panel.ZIndex="4"
+              HorizontalAlignment="Stretch" VerticalAlignment="Stretch">
+          <Border Background="{DynamicResource DetailedSurface}" CornerRadius="12" ClipToBounds="True">
+            <Grid Margin="18">
+              <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="*" /><RowDefinition Height="Auto" /></Grid.RowDefinitions>
+              <TextBlock Text="{DynamicResource Loc.UpdateAvailableTitle}" FontSize="18" FontWeight="SemiBold" Foreground="{DynamicResource Ink}" />
+              <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Margin="0,15,0,14">
+                <StackPanel>
+                  <TextBlock Text="{Binding UpdateAvailableMessage}" FontSize="12" TextWrapping="Wrap" Foreground="{DynamicResource SoftInk}" />
+                  <ProgressBar Value="{Binding UpdateProgress}" Maximum="1" Height="6" Margin="0,16,0,0" Background="{DynamicResource InputSurface}" Foreground="{DynamicResource Accent}"
+                               Visibility="{Binding IsUpdateDownloading, Converter={StaticResource BooleanToVisibility}}" />
+                  <TextBlock Text="{Binding UpdateStatusMessage}" FontSize="10.4" Foreground="{DynamicResource SoftInk}" Margin="0,8,0,0" TextWrapping="Wrap" />
+                </StackPanel>
+              </ScrollViewer>
+              <StackPanel Grid.Row="2" Orientation="Horizontal" HorizontalAlignment="Right">
+                <Button x:Name="UpdateLaterButton" Click="DeferUpdate" Content="{DynamicResource Loc.UpdateLater}" Style="{StaticResource SecondaryButton}" Margin="0,0,8,0" />
+                <Button x:Name="UpdateNowButton" Click="StartUpdate" Content="{DynamicResource Loc.UpdateNow}" Style="{StaticResource PrimaryButton}" />
+              </StackPanel>
+            </Grid>
+          </Border>
+        </Grid>
+    </Grid>
+  </Border>
+</Window>

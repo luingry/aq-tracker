@@ -4,7 +4,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $repoRoot = Split-Path -Parent $PSScriptRoot
-$latestLabel = Join-Path $repoRoot 'artifacts\CodexTracker-latest.exe'
+$latestLabel = Join-Path $repoRoot 'artifacts\AqTracker-latest.exe'
 
 Write-Host 'Regra de implementação: gerando .exe final da build...' -ForegroundColor Cyan
 & (Join-Path $repoRoot 'scripts\build-installer.ps1') -SkipTests:$SkipTests
@@ -13,7 +13,7 @@ if ($LASTEXITCODE -ne 0) {
     throw 'Build final falhou durante a geração do instalador.'
 }
 
-$artifact = Get-ChildItem -LiteralPath (Join-Path $repoRoot 'artifacts') -Filter 'CodexTracker-Setup-*.exe' |
+$artifact = Get-ChildItem -LiteralPath (Join-Path $repoRoot 'artifacts') -Filter 'AqTracker-Setup-*.exe' |
     Sort-Object LastWriteTime -Descending |
     Select-Object -First 1
 
