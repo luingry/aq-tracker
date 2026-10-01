@@ -7,10 +7,13 @@ internal static class ThemeManager
 {
     public static void Apply(string theme) => Apply(theme, AccentPalette.DefaultBaseHex);
 
-    public static void Apply(string theme, string? accentColor)
+    public static void Apply(string theme, string? accentColor, string? claudeAccentColor = "#D97757")
     {
         var dark = string.Equals(theme, "Escuro", StringComparison.OrdinalIgnoreCase);
         var accent = AccentPalette.Create(accentColor, dark);
+        var claude = AccentPalette.Create(claudeAccentColor, dark);
+        Set("ClaudeAccent", claude.AccentHex);
+        Set("ClaudeMetadataAccent", claude.AgentMetadataHex);
         Set("Porcelain", dark ? AccentPalette.DarkSurfaceHex : "#F7F7F4");
         Set("Ink", dark ? "#F1F4F2" : "#202523");
         Set("SoftInk", dark ? "#AEB9B4" : "#59635F");

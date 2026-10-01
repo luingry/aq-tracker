@@ -5,9 +5,9 @@ namespace CodexTracker.Core;
 
 public enum ConnectionState { Loading, Live, Stale, SignedOut, Error }
 
-public sealed record QuotaWindow(string Id, string Label, double UsedPercent, DateTimeOffset? ResetsAt, int? WindowDurationMins, string? Detail = null)
+public sealed record QuotaWindow(string Id, string Label, double UsedPercent, DateTimeOffset? ResetsAt, int? WindowDurationMins, string? Detail = null, bool HasUsage = true)
 {
-    public double RemainingPercent => Net48Compatibility.Clamp(100 - UsedPercent, 0, 100);
+    public double RemainingPercent => HasUsage ? Net48Compatibility.Clamp(100 - UsedPercent, 0, 100) : 0;
 }
 
 public sealed record RateLimitSnapshot(

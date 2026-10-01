@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.22.0] - 2026-10-01
+
+### Added
+
+- Dynamic Claude profile with independent colors, live interactive session activity, unread completions, desktop focus detection, and a compact quota detail block.
+- Independent Claude OAuth sign-in with PKCE, local callback and manual code fallback, cancellation, automatic token refresh, and atomic CurrentUser DPAPI token storage.
+- Claude 5h/7d usage polling with stale snapshot recovery and bounded exponential backoff. Engaged Codex and Claude profiles show their most restrictive permitted quotas side by side.
+- Localized Claude settings, profile toggle, color selection, and regression coverage for engagement, sessions, OAuth, DPAPI, quota parsing and provider isolation.
+
+### Fixed
+
+- Agent row and unread persistence identities now include the provider, preventing a Claude session from consuming a Codex completion with the same id.
+
 ## [0.21.0] - 2026-09-08
 
 ### Added

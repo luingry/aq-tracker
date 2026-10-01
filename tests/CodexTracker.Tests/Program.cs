@@ -1,6 +1,10 @@
 using System.IO;
 using System.Diagnostics;
 using System.Text.Json;
+using System.Net;
+using System.Net.Http;
+using System.Security.Cryptography;
+using System.Text;
 using Microsoft.Data.Sqlite;
 using CodexTracker.Core;
 using CodexTracker;
@@ -319,7 +323,7 @@ Assert(agentListTemplate.Contains("x:Name=\"AgentListWrapper\" Width=\"288\" Max
 Assert(agentListTemplate.Contains("Text=\"{Binding ModelAndEffort}\"", StringComparison.Ordinal) && agentListTemplate.Contains("Foreground=\"{DynamicResource AgentMetadataAccent}\"", StringComparison.Ordinal), "agent model and effort bind to the contrast-safe muted accent resource instead of fixed opacity or generic secondary ink");
 Assert(agentListTemplate.Contains("Visibility=\"{Binding ShowsProjectSeparator, Converter={StaticResource BooleanToVisibility}}\"", StringComparison.Ordinal) && agentListTemplate.Contains("<Grid.ColumnDefinitions><ColumnDefinition Width=\"Auto\" /><ColumnDefinition Width=\"*\" /></Grid.ColumnDefinitions>", StringComparison.Ordinal) && agentListTemplate.Contains("Text=\"{Binding ProjectName}\" FontSize=\"9.2\" FontWeight=\"SemiBold\" Foreground=\"{DynamicResource SoftInk}\" Opacity=\".62\"", StringComparison.Ordinal) && agentListTemplate.Contains("<Border Grid.Column=\"1\" Height=\"1\" Background=\"{DynamicResource InputSurface}\" Opacity=\".65\" VerticalAlignment=\"Center\" Margin=\"8,0,0,0\" />", StringComparison.Ordinal), "agent projects render a subtle name-left divider with the project line extending to its right");
 Assert(agentListTemplate.Contains("x:Name=\"MarkAllCompletedAgentsReadButton\"", StringComparison.Ordinal) && agentListTemplate.Contains("Panel.ZIndex=\"1\"", StringComparison.Ordinal) && agentListTemplate.Contains("HorizontalAlignment=\"Right\" VerticalAlignment=\"Top\"", StringComparison.Ordinal) && agentListTemplate.Contains("Background=\"{DynamicResource DetailedSurface}\"", StringComparison.Ordinal) && agentListTemplate.Contains("Visibility=\"{Binding CanMarkAllCompletedAgentsRead", StringComparison.Ordinal) && agentListTemplate.Contains("ToolTip=\"{DynamicResource Loc.MarkAllCompletedAgentsRead}\"", StringComparison.Ordinal) && agentListTemplate.Contains("AutomationProperties.Name=\"{DynamicResource Loc.MarkAllCompletedAgentsRead}\"", StringComparison.Ordinal) && agentListTemplate.Contains("Data=\"M2,12L7,17L16,8\"", StringComparison.Ordinal) && agentListTemplate.Contains("Data=\"M8,12L13,17L22,8\"", StringComparison.Ordinal), "the mark-all completed-work action is an accessible solid double-check overlay in the list's upper-right corner without reserving layout space");
-Assert(mainWindowSource.Contains("_unreadAgentWorks.RemoveAll(work => activeThreadIds.Contains(work.ThreadId))", StringComparison.Ordinal), "agent refresh removes a completed row only when that same root chat starts running again");
+Assert(mainWindowSource.Contains("work.Provider == AgentProvider.Codex && activeThreadIds.Contains(work.ThreadId)", StringComparison.Ordinal), "Codex agent refresh removes a completed row only when that same root chat starts running again");
 Assert(agentListTemplate.Contains("<Grid.ColumnDefinitions><ColumnDefinition Width=\"Auto\" /><ColumnDefinition Width=\"*\" /></Grid.ColumnDefinitions>", StringComparison.Ordinal) && agentListTemplate.Contains("x:Name=\"KindLabel\" Text=\"{Binding Type}\" MaxWidth=\"58\"", StringComparison.Ordinal) && agentListTemplate.Contains("Margin=\"0,0,6,0\"", StringComparison.Ordinal) && agentListTemplate.Contains("Grid.Column=\"1\" Text=\"{Binding ModelAndEffort}\"", StringComparison.Ordinal) && agentListTemplate.Contains("TextTrimming=\"CharacterEllipsis\" HorizontalAlignment=\"Left\"", StringComparison.Ordinal) && agentListTemplate.Contains("x:Name=\"StatusLabel\" Text=\"{Binding Status}\"", StringComparison.Ordinal) && agentListTemplate.Contains("<StackPanel x:Name=\"CompletedStatus\" Orientation=\"Horizontal\" Visibility=\"Collapsed\">", StringComparison.Ordinal) && agentListTemplate.Contains("x:Name=\"CompletedRowCheck\"", StringComparison.Ordinal) && agentListTemplate.Contains("<Setter TargetName=\"StatusLabel\" Property=\"Visibility\" Value=\"Collapsed\" />", StringComparison.Ordinal) && agentListTemplate.Contains("<Setter TargetName=\"CompletedStatus\" Property=\"Visibility\" Value=\"Visible\" />", StringComparison.Ordinal) && !agentListTemplate.Contains("<TranslateTransform Y=\"-9\" />", StringComparison.Ordinal) && !agentListTemplate.Contains("TextAlignment=\"Right\"", StringComparison.Ordinal), "completed-row check sits immediately beside the completed status while elapsed remains right-aligned without increasing the status-row height");
 Assert(mainWindowXaml.Contains("Text=\"{Binding Tokens}\" FontFamily=\"./assets/fonts/#Source Sans 3\" FontSize=\"10\"", StringComparison.Ordinal) && mainWindowXaml.Contains("Text=\"{Binding SecondaryText}\" FontFamily=\"./assets/fonts/#Source Sans 3\" FontSize=\"8\" Foreground=\"{DynamicResource SoftInk}\"", StringComparison.Ordinal) && !mainWindowXaml.Contains("Text=\"{Binding Cost}\"", StringComparison.Ordinal) && !mainWindowXaml.Contains("Text=\"{Binding TariffNote}\"", StringComparison.Ordinal), "ranking rows use exactly one small numeric secondary line below tokens for either the estimated cost or the localized no-tariff text");
 var tooltipPresentationSource = File.ReadAllText(Path.Combine(Directory.GetCurrentDirectory(), "src", "CodexTracker", "TokenUsageTooltip.cs"));
@@ -381,7 +385,7 @@ Assert(mainWindowSource.Contains("WidgetSizePolicy.DetailedHeightForContent(", S
 var progressStyleStart = appXaml.IndexOf("<Style TargetType=\"ProgressBar\">", StringComparison.Ordinal);
 var progressStyleEnd = appXaml.IndexOf("</Style>", progressStyleStart, StringComparison.Ordinal);
 var progressStyle = progressStyleStart >= 0 && progressStyleEnd > progressStyleStart ? appXaml.Substring(progressStyleStart, progressStyleEnd - progressStyleStart) : string.Empty;
-Assert(!progressStyle.Contains("WorkGlow", StringComparison.Ordinal) && !progressStyle.Contains("IsWorkAnimationEnabled", StringComparison.Ordinal) && mainWindowXaml.Contains("IsWorking=\"{Binding IsWorkAnimationEnabled}\"", StringComparison.Ordinal), "ranking progress bars stay static while the weekly circular quota gauges retain their dedicated work glow");
+Assert(!progressStyle.Contains("WorkGlow", StringComparison.Ordinal) && !progressStyle.Contains("IsWorkAnimationEnabled", StringComparison.Ordinal) && mainWindowXaml.Contains("IsWorking=\"{Binding IsCodexWorkAnimationEnabled}\"", StringComparison.Ordinal), "ranking progress bars stay static while the weekly circular quota gauges retain their dedicated work glow");
 var reasoningGlowStart = mainWindowXaml.IndexOf("x:Name=\"ReasoningGlow\"", StringComparison.Ordinal);
 var reasoningGlowEnd = mainWindowXaml.IndexOf("</DataTemplate>", reasoningGlowStart, StringComparison.Ordinal);
 var reasoningGlowTemplate = reasoningGlowStart >= 0 && reasoningGlowEnd > reasoningGlowStart ? mainWindowXaml.Substring(reasoningGlowStart, reasoningGlowEnd - reasoningGlowStart) : string.Empty;
@@ -400,7 +404,7 @@ var refreshAgentsCode = refreshAgentsStart >= 0 && refreshAgentsEnd > refreshAge
 Assert(refreshAgentsCode.Contains("else if (_settings.IsAgentListExpanded && !_viewModel.Expanded) _viewModel.IsAgentListOpen = true;", StringComparison.Ordinal), "agent refresh never opens the list while detailed mode is active");
 Assert(mainWindowCode.Contains("_unreadAgentWorks[index] = work with { Title = title.Trim() };", StringComparison.Ordinal) && mainWindowCode.Contains("if (unreadChanged)", StringComparison.Ordinal) && mainWindowCode.Contains("PersistUnreadAgentWorks();", StringComparison.Ordinal), "late app-server titles replace and persist fallback titles for unread completed work");
 Assert(mainWindowCode.Contains("_viewModel.ApplyAgentTitles(titles);", StringComparison.Ordinal), "late app-server titles immediately update active agent rows instead of waiting for the next activity snapshot");
-Assert(mainWindowCode.Contains("_unreadAgentWorks.RemoveAll(work => activeThreadIds.Contains(work.ThreadId))", StringComparison.Ordinal), "agent refresh permanently discards an old unread completion when the same root chat starts running again");
+Assert(mainWindowCode.Contains("work.Provider == AgentProvider.Codex && activeThreadIds.Contains(work.ThreadId)", StringComparison.Ordinal), "agent refresh permanently discards an old unread Codex completion when the same root chat starts running again");
 var openAgentThreadStart = mainWindowCode.IndexOf("private void OpenAgentThread", StringComparison.Ordinal);
 var openAgentThreadEnd = mainWindowCode.IndexOf("private void MarkThreadRead", openAgentThreadStart, StringComparison.Ordinal);
 var openAgentThreadCode = openAgentThreadStart >= 0 && openAgentThreadEnd > openAgentThreadStart ? mainWindowCode.Substring(openAgentThreadStart, openAgentThreadEnd - openAgentThreadStart) : string.Empty;
@@ -1310,9 +1314,351 @@ Assert(mainWindowXaml.Contains("x:Name=\"UpdateDialogPanel\"", StringComparison.
        "the update dialog is themed like the rest of the widget and exposes update/defer actions");
 Assert(LocalizationManager.HasTextKey("CheckForUpdates") && LocalizationManager.HasTextKey("UpdateAvailableTitle") && LocalizationManager.HasTextKey("UpdateNow") && LocalizationManager.HasTextKey("UpdateLater") && LocalizationManager.HasTextKey("UpdateFailed"), "update strings are localized in both supported languages");
 
-Console.WriteLine("All CodexTracker core tests passed.");
+// Claude profile: deterministic engagement and permitted-window selection matrix.
+var claudeTestNow = new DateTimeOffset(2026, 10, 1, 12, 0, 0, TimeSpan.Zero);
+IReadOnlyList<QuotaWindow> profileCodexWindows = [new("codex:primary", "5h", 20, claudeTestNow.AddHours(2), 300), new("codex:secondary", "7d", 80, claudeTestNow.AddDays(2), 10080)];
+IReadOnlyList<QuotaWindow> profileClaudeWindows = [new("claude:five_hour", "5h", 70, claudeTestNow.AddHours(1), 300), new("claude:seven_day", "7d", 40, claudeTestNow.AddDays(3), 10080)];
+var profileStates = Enumerable.Range(0, 16).Select(bits => new ProfileActivity((bits & 1) != 0, (bits & 2) != 0, (bits & 4) != 0, (bits & 8) != 0)).ToArray();
+foreach (var codexProfile in profileStates)
+foreach (var claudeProfile in profileStates)
+foreach (var widgetActive in new[] { false, true })
+{
+    var codexEngaged = codexProfile.HasActiveWork || codexProfile.HasUnreadWork || codexProfile.IsForeground && !codexProfile.IsMinimized;
+    var claudeEngaged = claudeProfile.HasActiveWork || claudeProfile.HasUnreadWork || claudeProfile.IsForeground && !claudeProfile.IsMinimized;
+    Assert(WidgetVisibilityPolicy.ShouldShow(codexProfile, claudeProfile, widgetActive) == (codexEngaged || claudeEngaged || widgetActive), "profile visibility matrix: focus, minimized, work, unread and widget activity");
+    foreach (var display in new[] { "5h", "7d", "both" })
+    {
+        var selected = ProfileEngagementPolicy.Select(codexProfile, claudeProfile, AgentProvider.Codex, display, profileCodexWindows, profileClaudeWindows);
+        Assert(selected.Count == (display == "both" || codexEngaged && claudeEngaged ? 2 : 1), "profile gauge count follows engagement and compact preference");
+        if (codexEngaged && claudeEngaged)
+        {
+            Assert(selected.Select(item => item.Provider).SequenceEqual([AgentProvider.Codex, AgentProvider.Claude]), "dual profile order is always Codex then Claude");
+            Assert(selected[0].Window == (display == "5h" ? "5h" : "7d") && selected[1].Window == (display == "7d" ? "7d" : "5h"), "dual gauges choose the most restrictive permitted window independently");
+        }
+        else Assert(selected.All(item => item.Provider == (claudeEngaged ? AgentProvider.Claude : AgentProvider.Codex)), "single engagement and initial widget-only fallback choose the correct provider");
+    }
+}
+Assert(ProfileEngagementPolicy.Select(default, default, AgentProvider.Claude, "both", profileCodexWindows, profileClaudeWindows).All(item => item.Provider == AgentProvider.Claude), "widget-only display remembers Claude");
+var claudeProfileViewModel = new MainViewModel(clock: () => claudeTestNow);
+claudeProfileViewModel.ApplyQuota(new(profileCodexWindows, null, null, null, claudeTestNow));
+claudeProfileViewModel.ApplyClaude(new(profileClaudeWindows, null, null, null, claudeTestNow), ClaudeConnectionState.Connected, false);
+claudeProfileViewModel.SetProfileActivity(new(true, false, false, false), new(false, false, true, false));
+Assert(claudeProfileViewModel.CompactQuotaCount == 2 && claudeProfileViewModel.CompactLeftLabel == "7d" && claudeProfileViewModel.CompactRightLabel == "5h" && claudeProfileViewModel.CompactLeftPercent == "20%" && claudeProfileViewModel.CompactRightPercent == "30%", "view model binds independent restrictive percentages and labels");
+claudeProfileViewModel.SetProfileActivity(default, new(false, false, false, true));
+claudeProfileViewModel.SetProfileActivity(default, default);
+Assert(claudeProfileViewModel.CompactLeftPercent == "30%" && claudeProfileViewModel.CompactRightPercent == "60%", "last displayed profile survives widget focus");
+claudeProfileViewModel.SetClaudeEnabled(false);
+Assert(claudeProfileViewModel.CompactLeftPercent == "80%" && claudeProfileViewModel.CompactRightPercent == "20%", "disabling Claude resets widget fallback to Codex");
+
+// Registrations, desktop metadata cache, defensive sharing and unread transitions.
+var claudeFixtureRoot = Path.Combine(Path.GetTempPath(), "codex-tracker-claude-" + Guid.NewGuid().ToString("N"));
+var claudeSessionsRoot = Path.Combine(claudeFixtureRoot, "sessions");
+var claudeDesktopRoot = Path.Combine(claudeFixtureRoot, "desktop", "nested");
+Directory.CreateDirectory(claudeSessionsRoot);
+Directory.CreateDirectory(claudeDesktopRoot);
+try
+{
+    var livePids = new HashSet<int> { 101, 102, 103, 104, 105, 106, 107 };
+    WriteClaudeSession(claudeSessionsRoot, 101, "named", "busy", "interactive", "Named session", @"D:\Dev\fallback", claudeTestNow);
+    WriteClaudeSession(claudeSessionsRoot, 102, "desktop", "busy", "interactive", null, @"D:\Dev\fallback", claudeTestNow);
+    WriteClaudeSession(claudeSessionsRoot, 103, "cwd", "idle", "interactive", null, @"D:\Dev\cwd-fallback\", claudeTestNow);
+    WriteClaudeSession(claudeSessionsRoot, 104, "fallback", "unrecognized", "interactive", null, null, claudeTestNow);
+    WriteClaudeSession(claudeSessionsRoot, 105, "headless", "busy", "headless", null, null, claudeTestNow);
+    WriteClaudeSession(claudeSessionsRoot, 999, "dead", "busy", "interactive", null, null, claudeTestNow);
+    File.WriteAllText(Path.Combine(claudeSessionsRoot, "106.json"), "{partial");
+    var metadataPath = Path.Combine(claudeDesktopRoot, "local_desktop.json");
+    File.WriteAllText(Path.Combine(claudeDesktopRoot, "local_named.json"), JsonSerializer.Serialize(new { cliSessionId = "named", title = "Desktop title loses to registration name" }));
+    File.WriteAllText(metadataPath, JsonSerializer.Serialize(new { cliSessionId = "desktop", title = "Desktop title", model = "claude-sonnet", effort = "high", lastFocusedAt = claudeTestNow.AddMinutes(-5).ToUnixTimeMilliseconds() }));
+    var registrationService = new ClaudeSessionActivityService(claudeSessionsRoot, Path.GetDirectoryName(claudeDesktopRoot), livePids.Contains, () => claudeTestNow);
+    var registrations = registrationService.ReadSessions();
+    Assert(registrations.Count == 4 && registrations.Single(item => item.SessionId == "named").Title == "Named session" && registrations.Single(item => item.SessionId == "desktop").Title == "Desktop title" && registrations.Single(item => item.SessionId == "cwd").Title == "cwd-fallback" && registrations.Single(item => item.SessionId == "fallback").Title == "Claude", "Claude registration filters and full title fallback chain");
+    var metadataSession = registrations.Single(item => item.SessionId == "desktop");
+    Assert(metadataSession.Model == "claude-sonnet" && metadataSession.Effort == "high" && metadataSession.LastFocusedAt == claudeTestNow.AddMinutes(-5), "desktop metadata joins only by cliSessionId");
+    registrationService.ReadSessions();
+    Assert(registrationService.MetadataFilesParsedLastRead == 0, "unchanged large desktop metadata is cached by path and mtime");
+    using (var writer = new FileStream(Path.Combine(claudeSessionsRoot, "101.json"), FileMode.Open, FileAccess.Write, FileShare.ReadWrite | FileShare.Delete))
+        Assert(registrationService.ReadSessions().Any(item => item.SessionId == "named"), "Claude registration stays readable while writer holds it open");
+    var firstClaudeActivity = registrationService.ReadSnapshot();
+    Assert(firstClaudeActivity.ActiveAgents.Count == 2 && firstClaudeActivity.CompletedAgentWorks.Count == 0 && firstClaudeActivity.ActiveAgents.All(item => item.Provider == AgentProvider.Claude), "only busy Claude sessions are active; startup idle/unknown never creates completion");
+    WriteClaudeSession(claudeSessionsRoot, 101, "named", "idle", "interactive", "Named session", null, claudeTestNow.AddMinutes(1));
+    var claudeCompletion = registrationService.ReadSnapshot().CompletedAgentWorks.Single();
+    Assert(claudeCompletion.ThreadId == "named" && claudeCompletion.Provider == AgentProvider.Claude && claudeCompletion.CompletedAt == claudeTestNow.AddMinutes(1), "observed busy to idle creates a provider-specific completion");
+    Assert(registrationService.ReadSnapshot().CompletedAgentWorks.Count == 0, "idle registration does not repeat the same completion");
+    Assert(!ClaudeSessionActivityService.ShouldRemoveCompletion(claudeCompletion, [], new Dictionary<string, DateTimeOffset> { ["named"] = claudeCompletion.CompletedAt.AddMilliseconds(-1), ["other"] = claudeCompletion.CompletedAt.AddHours(1) }), "earlier focus and another session's focus keep unread work");
+    Assert(!ClaudeSessionActivityService.ShouldRemoveCompletion(claudeCompletion, [], new Dictionary<string, DateTimeOffset> { ["named"] = claudeCompletion.CompletedAt }), "equal focus timestamp keeps unread work");
+    Assert(ClaudeSessionActivityService.ShouldRemoveCompletion(claudeCompletion, [], new Dictionary<string, DateTimeOffset> { ["named"] = claudeCompletion.CompletedAt.AddMilliseconds(1) }), "later focus on the same session confirms read");
+    WriteClaudeSession(claudeSessionsRoot, 101, "named", "busy", "interactive", "Named session", null, claudeTestNow.AddMinutes(2));
+    var restartedClaude = registrationService.ReadSnapshot();
+    Assert(ClaudeSessionActivityService.ShouldRemoveCompletion(claudeCompletion, restartedClaude.ActiveAgents, new Dictionary<string, DateTimeOffset>()) && restartedClaude.ActiveAgents.Single(item => item.ThreadId == "named").StartedAt == claudeTestNow.AddMinutes(2), "returning to busy removes unread and resets elapsed");
+    livePids.Remove(101);
+    Assert(registrationService.ReadSnapshot().CompletedAgentWorks.Count == 0, "process disappearance while busy never creates completion");
+    livePids.Add(101);
+    WriteClaudeSession(claudeSessionsRoot, 101, "named", "idle", "interactive", "Named session", null, claudeTestNow.AddMinutes(3));
+    Assert(registrationService.ReadSnapshot().CompletedAgentWorks.Count == 0, "later idle after a missing process is not an observed busy transition");
+    WriteClaudeSession(claudeSessionsRoot, 102, "desktop", "unknown", "interactive", null, null, claudeTestNow.AddMinutes(4));
+    Assert(registrationService.ReadSnapshot().CompletedAgentWorks.Count == 1, "busy to any non-busy status ends observed work fail-closed");
+    File.WriteAllText(metadataPath, JsonSerializer.Serialize(new { cliSessionId = "desktop", title = "New desktop title", model = "claude-opus", effort = "low", lastFocusedAt = claudeTestNow.AddMinutes(6).ToUnixTimeMilliseconds() }));
+    File.SetLastWriteTimeUtc(metadataPath, claudeTestNow.AddMinutes(6).UtcDateTime);
+    Assert(registrationService.ReadSessions().Single(item => item.SessionId == "desktop").Title == "New desktop title" && registrationService.MetadataFilesParsedLastRead == 1, "desktop mtime change invalidates only the affected metadata cache");
+    var gitProject = Path.Combine(claudeFixtureRoot, "project");
+    Directory.CreateDirectory(Path.Combine(gitProject, ".git"));
+    Directory.CreateDirectory(Path.Combine(gitProject, "child"));
+    WriteClaudeSession(claudeSessionsRoot, 107, "project", "busy", "interactive", null, Path.Combine(gitProject, "child"), claudeTestNow);
+    Assert(registrationService.ReadSnapshot().ActiveAgents.Single(item => item.ThreadId == "project").ProjectPath == gitProject, "Claude project uses the shared Git root resolver");
+    File.Delete(metadataPath);
+    Assert(!registrationService.ReadSessions().Any(item => item.LastFocusedAt.HasValue), "deleted desktop metadata does not retain stale focus identity");
+
+    var legacyCompleted = JsonSerializer.Deserialize<CompletedAgentWork>("""{"CompletionId":"legacy:done","ThreadId":"legacy","Type":"Agent","Title":"Legacy","Status":"Completed","Model":"unknown","Effort":"unknown","StartedAt":"2026-10-01T10:00:00Z","CompletedAt":"2026-10-01T11:00:00Z"}""")!;
+    Assert(legacyCompleted.Provider == AgentProvider.Codex, "persisted work without Provider deserializes as Codex");
+    var oldSettingsPath = Path.Combine(claudeFixtureRoot, "settings.json");
+    File.WriteAllText(oldSettingsPath, "{}");
+    var legacyClaudeSettings = new SettingsStore(oldSettingsPath).Load();
+    Assert(legacyClaudeSettings.ClaudeProfileEnabled && legacyClaudeSettings.ClaudeAccentColor == "#D97757", "old settings receive compatible enabled/default Claude color");
+    var sameIdCodex = legacyCompleted with { ThreadId = "named" };
+    var combinedSettings = SettingsStore.Normalize(new AppSettings(UnreadAgentWorks: [sameIdCodex, claudeCompletion]));
+    Assert(combinedSettings.UnreadAgentWorks!.Count == 2, "persisted unread identity includes provider");
+    var combinedRows = new MainViewModel();
+    combinedRows.ApplyUnreadCompletedAgents([sameIdCodex, claudeCompletion]);
+    combinedRows.ApplyAgents(restartedClaude.ActiveAgents, claudeTestNow.AddMinutes(2), false);
+    Assert(combinedRows.AgentItems.Count(row => row.ThreadId == "named") == 2 && combinedRows.AgentItems.Any(row => row.Provider == AgentProvider.Codex && row.IsCompleted), "Claude reactivation never consumes a same-id Codex completion");
+    Assert(combinedRows.MarkAllCompletedAgentsRead() && !combinedRows.HasUnreadCompletedAgents && combinedRows.HasActiveAgents, "mark all read clears both providers and preserves active work");
+
+    // OAuth requests use a fake transport; production DPAPI and atomic persistence are real.
+    var tokensPath = Path.Combine(claudeFixtureRoot, "claude-tokens.dat");
+    var protectedStore = new ClaudeTokenStore(tokensPath);
+    var originalTokens = new ClaudeTokens("test-access", "test-refresh", claudeTestNow.AddHours(1));
+    protectedStore.Save(originalTokens);
+    Assert(protectedStore.Load() == originalTokens && !Encoding.UTF8.GetString(File.ReadAllBytes(tokensPath)).Contains("test-access"), "CurrentUser DPAPI round trip encrypts token bytes");
+    protectedStore.Save(originalTokens with { RefreshToken = "rotated-refresh" });
+    Assert(protectedStore.Load()!.RefreshToken == "rotated-refresh" && !Directory.GetFiles(claudeFixtureRoot, "*.tmp").Any(), "atomic credential replacement leaves rotated refresh persisted and no temporary files");
+    protectedStore.Delete();
+    Assert(protectedStore.Load() is null, "disconnect removes the independent token file");
+    File.WriteAllBytes(tokensPath, [1, 2, 3]);
+    Assert(protectedStore.Load() is null, "corrupt DPAPI data fails closed without exposing it");
+    protectedStore.Delete();
+
+    var attempt = new ClaudeOAuthAttempt(ClaudeOAuthConstants.ManualRedirect);
+    var query = ParseQuery(attempt.AuthorizeUri);
+    using (var hash = SHA256.Create())
+    {
+        var challenge = Convert.ToBase64String(hash.ComputeHash(Encoding.ASCII.GetBytes(attempt.Verifier))).TrimEnd('=').Replace('+', '-').Replace('/', '_');
+        Assert(attempt.Verifier.Length == 43 && attempt.State.Length == 43 && query["code_challenge"] == challenge && query["code_challenge_method"] == "S256", "PKCE verifier is 32 random bytes and the challenge is SHA256 base64url");
+    }
+    Assert(attempt.AuthorizeUri.GetLeftPart(UriPartial.Path) == ClaudeOAuthConstants.AuthorizeUrl && query["client_id"] == ClaudeOAuthConstants.ClientId && query["code"] == "true" && query["response_type"] == "code" && query["redirect_uri"] == ClaudeOAuthConstants.ManualRedirect && query["scope"] == ClaudeOAuthConstants.Scopes && query["state"] == attempt.State, "authorize URL carries exactly the required OAuth parameters");
+    Assert(attempt.TryParseManualCode("sample-code#" + attempt.State, out var parsedCode) && parsedCode == "sample-code" && !attempt.TryParseManualCode("sample-code#wrong", out _) && !attempt.TryParseManualCode("sample-code", out _) && !attempt.TryParseManualCode("#" + attempt.State, out _), "manual code parser accepts code#state and rejects mismatched or missing state/code");
+    Assert(new ClaudeOAuthAttempt("http://localhost:1234/callback").State != attempt.State, "each attempt receives fresh state");
+    Assert(attempt.TryValidateCallback("GET", "/callback", "test-code", attempt.State, out var callbackCode) && callbackCode == "test-code" &&
+        !attempt.TryValidateCallback("GET", "/callback", "test-code", "wrong", out _) &&
+        !attempt.TryValidateCallback("GET", "/other", "test-code", attempt.State, out _) &&
+        !attempt.TryValidateCallback("POST", "/callback", "test-code", attempt.State, out _) &&
+        !attempt.TryValidateCallback("GET", "/callback", null, attempt.State, out _), "callback validates method, route, code and state independently of listener availability");
+    if (HttpListener.IsSupported)
+    {
+        using (var callback = new ClaudeOAuthCallback())
+        using (var loopbackHttp = new HttpClient(new HttpClientHandler { UseProxy = false }) { Timeout = TimeSpan.FromSeconds(5) })
+        using (var callbackCancellation = new CancellationTokenSource(TimeSpan.FromSeconds(10)))
+        {
+            var callbackTask = callback.WaitForCodeAsync("You can close this window.", "Invalid callback.", callbackCancellation.Token);
+            using var rejectedCallback = await loopbackHttp.GetAsync(callback.Attempt.RedirectUri + "?code=test-code&state=wrong", callbackCancellation.Token);
+            Assert(rejectedCallback.StatusCode == HttpStatusCode.BadRequest && !callbackTask.IsCompleted, "loopback callback rejects a mismatched state without authorizing it");
+            using var acceptedCallback = await loopbackHttp.GetAsync(callback.Attempt.RedirectUri + "?code=test-code&state=" + callback.Attempt.State, callbackCancellation.Token);
+            Assert(acceptedCallback.IsSuccessStatusCode && await callbackTask == "test-code" && (await acceptedCallback.Content.ReadAsStringAsync()).Contains("You can close this window."), "loopback callback accepts matching state and returns a close-window page");
+        }
+        using (var cancelledCallback = new ClaudeOAuthCallback())
+        using (var cancelCallback = new CancellationTokenSource())
+        {
+            var callbackTask = cancelledCallback.WaitForCodeAsync("done", "invalid", cancelCallback.Token);
+            cancelCallback.Cancel();
+            var observedCancellation = false;
+            try { await callbackTask; } catch (OperationCanceledException) { observedCancellation = true; }
+            Assert(observedCancellation, "cancelling OAuth stops the pending listener");
+        }
+    }
+    else Console.WriteLine("Loopback smoke unavailable: HttpListener.IsSupported=false; callback validation and manual OAuth are covered.");
+    var memoryTokens = new TestClaudeTokenStore();
+    var usagePath = Path.Combine(claudeFixtureRoot, "usage.json");
+    var fakeOAuth = new TestHttpHandler(async (request, call) =>
+    {
+        if (call == 1)
+        {
+            Assert(request.Method == HttpMethod.Post && request.RequestUri!.AbsoluteUri == ClaudeOAuthConstants.TokenUrl, "code exchange uses POST token endpoint");
+            using var body = JsonDocument.Parse(await request.Content!.ReadAsStringAsync());
+            var payload = body.RootElement;
+            Assert(payload.GetProperty("grant_type").GetString() == "authorization_code" && payload.GetProperty("code").GetString() == "sample-code" && payload.GetProperty("redirect_uri").GetString() == attempt.RedirectUri && payload.GetProperty("code_verifier").GetString() == attempt.Verifier && payload.GetProperty("state").GetString() == attempt.State && payload.GetProperty("client_id").GetString() == ClaudeOAuthConstants.ClientId, "code exchange JSON carries PKCE, state and redirect");
+            return JsonResponse(HttpStatusCode.OK, """{"access_token":"issued-access","refresh_token":"issued-refresh","expires_in":3600}""");
+        }
+        Assert(request.Headers.Authorization?.Scheme == "Bearer" && request.Headers.Authorization.Parameter == "issued-access" && request.Headers.GetValues("anthropic-beta").Single() == "oauth-2025-04-20" && request.Headers.UserAgent.ToString() == "codex-tracker/0.22.0", "usage GET carries required headers and product version");
+        return JsonResponse(HttpStatusCode.OK, """{"five_hour":{"utilization":25,"resets_at":"2026-10-01T14:00:00Z"},"seven_day":{"utilization":60,"resets_at":null}}""");
+    });
+    using (var client = new ClaudeUsageClient(memoryTokens, usagePath, "0.22.0", fakeOAuth, () => claudeTestNow))
+    {
+        await client.ExchangeCodeAsync(attempt, parsedCode, CancellationToken.None);
+        Assert(client.State == ClaudeConnectionState.Connected && memoryTokens.Load()!.RefreshToken == "issued-refresh", "code exchange persists independent credentials");
+        await client.RefreshAsync(CancellationToken.None);
+        Assert(!client.IsStale && client.Snapshot!.Windows.Count == 2 && client.Snapshot.Windows[0].RemainingPercent == 75, "usage poll publishes and caches official remaining quota");
+        await client.RefreshAsync(CancellationToken.None, onlyIfStale: true);
+        Assert(fakeOAuth.Calls == 2, "fresh engagement does not duplicate usage polling");
+    }
+    using (var restartedClient = new ClaudeUsageClient(memoryTokens, usagePath, "0.22.0", new TestHttpHandler((_, _) => Task.FromResult(JsonResponse(HttpStatusCode.OK, "{}"))), () => claudeTestNow))
+        Assert(restartedClient.IsStale && restartedClient.Snapshot!.Windows.Count == 2, "restart loads last quota with explicit stale state");
+    var cancellationStore = new TestClaudeTokenStore();
+    using (var cancelledLogin = new CancellationTokenSource())
+    using (var cancelledClient = new ClaudeUsageClient(cancellationStore, Path.Combine(claudeFixtureRoot, "cancelled.json"), "0.22.0",
+        new TestHttpHandler((_, _) => { cancelledLogin.Cancel(); return Task.FromResult(JsonResponse(HttpStatusCode.OK, """{"access_token":"late","refresh_token":"late","expires_in":3600}""")); }), () => claudeTestNow))
+    {
+        var observedCancellation = false;
+        try { await cancelledClient.ExchangeCodeAsync(attempt, "sample-code", cancelledLogin.Token); }
+        catch (OperationCanceledException) { observedCancellation = true; }
+        Assert(observedCancellation && cancellationStore.Load() is null && cancelledClient.State == ClaudeConnectionState.Disconnected, "cancelled login cannot persist tokens returned late by HTTP");
+    }
+    foreach (var expiredSoon in new[] { true, false })
+    {
+        var rotationStore = new TestClaudeTokenStore(new("old-access", "old-refresh", expiredSoon ? claudeTestNow.AddMinutes(4) : claudeTestNow.AddHours(1)));
+        var refreshTransport = new TestHttpHandler(async (request, call) =>
+        {
+            if (request.RequestUri!.AbsoluteUri == ClaudeOAuthConstants.TokenUrl)
+            {
+                using var body = JsonDocument.Parse(await request.Content!.ReadAsStringAsync());
+                Assert(body.RootElement.GetProperty("grant_type").GetString() == "refresh_token" && body.RootElement.GetProperty("refresh_token").GetString() == "old-refresh" && body.RootElement.GetProperty("client_id").GetString() == ClaudeOAuthConstants.ClientId, "refresh request uses stored independent refresh token");
+                return JsonResponse(HttpStatusCode.OK, """{"access_token":"new-access","refresh_token":"new-refresh","expires_in":3600}""");
+            }
+            if (!expiredSoon && call == 1) return JsonResponse(HttpStatusCode.Unauthorized, "{}");
+            Assert(rotationStore.Load()!.RefreshToken == "new-refresh" && request.Headers.Authorization!.Parameter == "new-access", "rotation is persisted before retrying usage with new access");
+            return JsonResponse(HttpStatusCode.OK, "{}");
+        });
+        using var refreshedClient = new ClaudeUsageClient(rotationStore, Path.Combine(claudeFixtureRoot, "rotation-" + expiredSoon + ".json"), "0.22.0", refreshTransport, () => claudeTestNow);
+        await refreshedClient.RefreshAsync(CancellationToken.None);
+        Assert(refreshedClient.State == ClaudeConnectionState.Connected && !refreshedClient.IsStale && refreshTransport.Calls == (expiredSoon ? 2 : 3), "refresh before expiry and retry after 401 both succeed");
+    }
+    foreach (var failureStatus in new[] { HttpStatusCode.BadRequest, HttpStatusCode.Unauthorized })
+    {
+        var rejectedStore = new TestClaudeTokenStore(new("old", "revoked", claudeTestNow.AddMinutes(1)));
+        using var rejectedClient = new ClaudeUsageClient(rejectedStore, Path.Combine(claudeFixtureRoot, "rejected.json"), "0.22.0",
+            new TestHttpHandler((_, _) => Task.FromResult(JsonResponse(failureStatus, """{"error":"invalid_grant"}"""))), () => claudeTestNow);
+        await rejectedClient.RefreshAsync(CancellationToken.None);
+        Assert(rejectedClient.State == ClaudeConnectionState.Reconnect && rejectedStore.Load() is null && rejectedClient.IsStale, "invalid_grant/400/401 refresh requires reconnect and removes invalid credentials");
+    }
+    var retryRejectedStore = new TestClaudeTokenStore(originalTokens);
+    foreach (var rejectedUsageStatus in new[] { HttpStatusCode.BadRequest, HttpStatusCode.Unauthorized })
+    {
+        var preemptiveStore = new TestClaudeTokenStore(originalTokens with { ExpiresAt = claudeTestNow.AddMinutes(1) });
+        var preemptiveTransport = new TestHttpHandler((request, _) => Task.FromResult(request.Method == HttpMethod.Post
+            ? JsonResponse(HttpStatusCode.OK, """{"access_token":"new","refresh_token":"rotated","expires_in":3600}""")
+            : JsonResponse(rejectedUsageStatus, "{}")));
+        using var preemptiveClient = new ClaudeUsageClient(preemptiveStore, Path.Combine(claudeFixtureRoot, "preemptive.json"), "0.22.0", preemptiveTransport, () => claudeTestNow);
+        await preemptiveClient.RefreshAsync(CancellationToken.None);
+        Assert(preemptiveClient.State == ClaudeConnectionState.Reconnect && preemptiveStore.Load() is null && preemptiveTransport.Calls == 2, "400/401 after preemptive refresh requires reconnect without a second refresh loop");
+    }
+    using (var retryRejected = new ClaudeUsageClient(retryRejectedStore, usagePath, "0.22.0", new TestHttpHandler((request, _) => Task.FromResult(
+        request.Method == HttpMethod.Post ? JsonResponse(HttpStatusCode.OK, """{"access_token":"new","refresh_token":"rotated","expires_in":3600}""") : JsonResponse(HttpStatusCode.Unauthorized, "{}"))), () => claudeTestNow))
+    {
+        await retryRejected.RefreshAsync(CancellationToken.None);
+        Assert(retryRejected.State == ClaudeConnectionState.Reconnect && retryRejectedStore.Load() is null, "401 after successful token refresh disconnects without looping");
+    }
+    var backoffNow = claudeTestNow;
+    var backoffHandler = new TestHttpHandler((_, call) => Task.FromResult(JsonResponse(call % 2 == 1 ? (HttpStatusCode)429 : HttpStatusCode.ServiceUnavailable, "{}")));
+    using (var backoffClient = new ClaudeUsageClient(new TestClaudeTokenStore(originalTokens), Path.Combine(claudeFixtureRoot, "backoff.json"), "0.22.0", backoffHandler, () => backoffNow))
+    {
+        foreach (var seconds in new[] { 60, 120, 240, 480, 600, 600 })
+        {
+            await backoffClient.RefreshAsync(CancellationToken.None);
+            Assert(backoffClient.NextAttemptAt == backoffNow.AddSeconds(seconds) && backoffClient.IsStale, "429/5xx exponential backoff caps at ten minutes");
+            var calls = backoffHandler.Calls;
+            await backoffClient.RefreshAsync(CancellationToken.None, onlyIfStale: true);
+            Assert(backoffHandler.Calls == calls, "engagement honors backoff");
+            backoffNow = backoffClient.NextAttemptAt;
+        }
+    }
+    using (var disconnectClient = new ClaudeUsageClient(new TestClaudeTokenStore(originalTokens), usagePath, "0.22.0", new TestHttpHandler((_, _) => Task.FromResult(JsonResponse(HttpStatusCode.OK, "{}"))), () => claudeTestNow))
+    {
+        await disconnectClient.DisconnectAsync();
+        Assert(disconnectClient.State == ClaudeConnectionState.Disconnected && disconnectClient.Snapshot is null && !File.Exists(usagePath), "disconnect deletes tokens and prior-account quota cache");
+    }
+}
+finally { Directory.Delete(claudeFixtureRoot, true); }
+
+Assert(CodexDesktopWindowMonitor.IsCodexDesktopExecutable(@"C:\Program Files\WindowsApps\OpenAI.Codex_1\app\ChatGPT.exe") && !CodexDesktopWindowMonitor.IsCodexDesktopExecutable(@"C:\cli\codex.exe"), "Codex executable detection remains unchanged");
+Assert(CodexDesktopWindowMonitor.IsClaudeDesktopExecutable(@"C:\Program Files\WindowsApps\Claude_1\app\Claude.exe") && CodexDesktopWindowMonitor.IsClaudeDesktopExecutable(@"C:\Users\user\AppData\Local\AnthropicClaude\app-1\Claude.exe") && !CodexDesktopWindowMonitor.IsClaudeDesktopExecutable(@"C:\Users\user\AppData\Roaming\Claude\claude-code\1\claude.exe") && !CodexDesktopWindowMonitor.IsClaudeDesktopExecutable(@"C:\random\Claude.exe"), "Claude desktop detection admits MSIX and Squirrel but excludes CLI and arbitrary namesakes");
+Assert(CodexDesktopWindowMonitor.ObserveForeground(@"C:\Program Files\WindowsApps\Claude_1\Claude.exe", true, false, false).Provider == AgentProvider.Claude && CodexDesktopWindowMonitor.ObserveForeground(@"C:\Program Files\WindowsApps\Claude_1\Claude.exe", false, false, false).Provider is null && CodexDesktopWindowMonitor.ObserveForeground(@"C:\Program Files\WindowsApps\Claude_1\Claude.exe", true, true, false).Provider is null, "Claude monitor rejects invisible/cloaked windows like Codex");
+using (var usageDocument = JsonDocument.Parse("""{"five_hour":{"utilization":0,"resets_at":"2026-10-01T15:00:00+03:00"},"seven_day":{"utilization":100,"resets_at":"invalid"},"ignored":{"utilization":99}}"""))
+{
+    var usage = ClaudeUsageParser.Parse(usageDocument.RootElement, claudeTestNow);
+    Assert(usage.Windows.Count == 2 && usage.Windows[0].Id == "claude:five_hour" && usage.Windows[0].WindowDurationMins == 300 && usage.Windows[0].RemainingPercent == 100 && usage.Windows[0].ResetsAt == claudeTestNow && usage.Windows[1].Id == "claude:seven_day" && usage.Windows[1].WindowDurationMins == 10080 && usage.Windows[1].RemainingPercent == 0 && usage.Windows[1].ResetsAt is null, "usage parser reads boundary values, durations and reset offsets; ignores extra keys and invalid reset");
+}
+using (var nullUsageDocument = JsonDocument.Parse("""{"five_hour":null,"seven_day":{"utilization":null,"resets_at":"2026-10-01T12:00:00Z"}}"""))
+{
+    var unknownQuota = ClaudeUsageParser.Parse(nullUsageDocument.RootElement, claudeTestNow).Windows.Single();
+    Assert(!unknownQuota.HasUsage && QuotaPresentation.FormatWeeklyRemaining(unknownQuota) == "--" && unknownQuota.ResetsAt == claudeTestNow, "null utilization preserves known reset while displaying unknown percentage");
+}
+foreach (var json in new[] { "{}", "null", "[]", """{"five_hour":null}""", """{"five_hour":{"utilization":-1},"seven_day":{"utilization":101}}""", """{"five_hour":{"utilization":"50"},"seven_day":{}}""" })
+{
+    using var document = JsonDocument.Parse(json);
+    Assert(ClaudeUsageParser.Parse(document.RootElement, claudeTestNow).Windows.Count == 0, "unknown/missing/null/malformed utilization stays unknown rather than fabricating zero usage");
+}
+foreach (var key in new[] { "ClaudeProfile", "ClaudeAccentColor", "ClaudeConnected", "ClaudeDisconnected", "ClaudeReconnect", "ClaudeConnect", "ClaudeConnectCode", "ClaudeManualFallback", "ClaudeDisconnect", "ClaudeConnectSettings", "ClaudeStale", "ClaudeWaitingBrowser", "ClaudePasteCode", "ClaudeSubmitCode", "ClaudeInvalidCode", "ClaudeLoginFailed", "ClaudeLoginCancelled", "ClaudeBrowserDone", "ClaudeInvalidCallback", "ProfileQuotaIndicator" })
+    Assert(LocalizationManager.HasTextKey(key), "Claude UI text exists in both languages: " + key);
+Assert(mainWindowXaml.Contains("ProgressBrush=\"{Binding CompactLeftBrush}\"") && mainWindowXaml.Contains("ProgressBrush=\"{Binding CompactRightBrush}\"") && mainWindowXaml.Contains("Binding IsClaude") && mainWindowXaml.Contains("ClaudeDetailBlock") && mainWindowXaml.Contains("Click=\"ConnectClaudeWithCode\""), "UI binds profile colors, Claude rows, detail and manual fallback");
+
+var claudeUiRoot = Path.Combine(Path.GetTempPath(), "codex-tracker-claude-ui-" + Guid.NewGuid().ToString("N"));
+Exception? claudeUiFailure = null;
+var claudeUiThread = new Thread(() =>
+{
+    CodexTracker.App? application = null;
+    CodexTracker.MainWindow? window = null;
+    try
+    {
+        application = new CodexTracker.App();
+        application.InitializeComponent();
+        window = new CodexTracker.MainWindow(demo: true, settingsStore: new SettingsStore(Path.Combine(claudeUiRoot, "settings.json")));
+        var vm = (MainViewModel)window.DataContext;
+        vm.ApplyQuota(new(profileCodexWindows, null, null, null, claudeTestNow));
+        vm.ApplyClaude(new(profileClaudeWindows, null, null, null, claudeTestNow), ClaudeConnectionState.Connected, true);
+        vm.SetProfileActivity(new(true, false, false, false), new(false, false, true, false));
+        window.Measure(new System.Windows.Size(window.Width, window.Height));
+        window.Arrange(new System.Windows.Rect(0, 0, window.Width, window.Height));
+        window.Dispatcher.Invoke(() => { }, System.Windows.Threading.DispatcherPriority.ApplicationIdle);
+        var leftHost = (System.Windows.Controls.Grid)window.FindName("CompactFiveHourGauge");
+        var rightHost = (System.Windows.Controls.Grid)window.FindName("CompactWeeklyGauge");
+        var leftGauge = leftHost.Children.OfType<CircularQuotaGauge>().Single();
+        var rightGauge = rightHost.Children.OfType<CircularQuotaGauge>().Single();
+        Assert(leftHost.Visibility == System.Windows.Visibility.Visible && rightHost.Visibility == System.Windows.Visibility.Visible && leftGauge.Value == 20 && rightGauge.Value == 30, "real WPF compact bindings render Codex left and Claude right with independent values");
+        Assert(((System.Windows.Media.SolidColorBrush)leftGauge.ProgressBrush).Color != ((System.Windows.Media.SolidColorBrush)rightGauge.ProgressBrush).Color, "real WPF gauges receive independent theme-adjusted profile brushes");
+        Assert(leftHost.Children.OfType<System.Windows.Controls.TextBlock>().Select(block => block.Text).Contains("7d") && rightHost.Children.OfType<System.Windows.Controls.TextBlock>().Select(block => block.Text).Contains("5h"), "real WPF labels follow each selected window");
+        Assert(!vm.IsCodexWorkAnimationEnabled && vm.CompactRightTooltip.Contains(LocalizationManager.Text("ClaudeStale")), "Claude-only work never animates the detailed Codex gauge and stale cache is identified in compact tooltips");
+        vm.SetProfileColors("Escuro", "#FFB000", "#D97757");
+        window.Dispatcher.Invoke(() => { }, System.Windows.Threading.DispatcherPriority.ApplicationIdle);
+        Assert(((System.Windows.Media.SolidColorBrush)rightGauge.ProgressBrush).Color ==
+            (System.Windows.Media.Color)System.Windows.Media.ColorConverter.ConvertFromString(AccentPalette.Create("#D97757", true).AccentHex), "Claude gauge uses the same contrast-safe dark AccentPalette as Codex");
+        vm.SetProfileActivity(default, new(true, false, false, false));
+        vm.SetCompactQuotaDisplay("7d");
+        window.Dispatcher.Invoke(() => { }, System.Windows.Threading.DispatcherPriority.ApplicationIdle);
+        Assert(leftHost.Visibility == System.Windows.Visibility.Collapsed && rightGauge.Value == 60, "single Claude display uses its permitted quota without changing Codex detail analytics");
+        vm.Expanded = true;
+        var claudeDetail = (System.Windows.Controls.Border)window.FindName("ClaudeDetailBlock");
+        window.Dispatcher.Invoke(() => { }, System.Windows.Threading.DispatcherPriority.ApplicationIdle);
+        Assert(claudeDetail.Visibility == System.Windows.Visibility.Visible && vm.ClaudeDetailStatus == LocalizationManager.Text("ClaudeStale") && vm.Weekly == "20%", "detailed UI retains Codex data and identifies stale Claude quota");
+        vm.SetClaudeEnabled(false);
+        window.Dispatcher.Invoke(() => { }, System.Windows.Threading.DispatcherPriority.ApplicationIdle);
+        Assert(claudeDetail.Visibility == System.Windows.Visibility.Collapsed, "disabled profile hides the Claude detail block");
+        vm.ApplyClaude(null, ClaudeConnectionState.Disconnected, true);
+        Assert(vm.ClaudeDetailStatus == LocalizationManager.Text("ClaudeConnectSettings"), "disconnected Claude detail provides the settings connection instruction");
+    }
+    catch (Exception error) { claudeUiFailure = error; }
+    finally { window?.Close(); application?.Shutdown(); }
+});
+claudeUiThread.SetApartmentState(ApartmentState.STA);
+claudeUiThread.Start();
+claudeUiThread.Join();
+if (Directory.Exists(claudeUiRoot)) Directory.Delete(claudeUiRoot, true);
+if (claudeUiFailure is not null) throw new InvalidOperationException("Claude WPF smoke failed", claudeUiFailure);
+
+Console.WriteLine("All CodexTracker core tests passed (including Claude engagement, sessions, OAuth, DPAPI, usage and WPF bindings).");
 
 static void Assert(bool condition, string message) { if (!condition) throw new InvalidOperationException("Test failed: " + message); }
+static void WriteClaudeSession(string root, int pid, string sessionId, string status, string kind, string? name, string? cwd, DateTimeOffset at) =>
+    File.WriteAllText(Path.Combine(root, pid + ".json"), JsonSerializer.Serialize(new { pid, sessionId, status, kind, name, cwd, entrypoint = "desktop", updatedAt = at.ToUnixTimeMilliseconds(), statusUpdatedAt = at.ToUnixTimeMilliseconds() }));
+static HttpResponseMessage JsonResponse(HttpStatusCode status, string json) => new(status) { Content = new StringContent(json, Encoding.UTF8, "application/json") };
+static Dictionary<string, string> ParseQuery(Uri uri) => uri.Query.TrimStart('?').Split('&').Select(part => part.Split('=')).ToDictionary(parts => Uri.UnescapeDataString(parts[0]), parts => Uri.UnescapeDataString(parts[1]));
 static int CachedRolloutCount(AgentActivityService service) =>
     ((System.Collections.IDictionary)(typeof(AgentActivityService).GetField("_cache", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)?.GetValue(service)
         ?? throw new MissingFieldException(typeof(AgentActivityService).FullName, "_cache"))).Count;
@@ -1341,4 +1687,17 @@ static void CopyFileSnapshot(string sourcePath, string destinationPath)
         destination.Write(buffer, 0, read);
         remaining -= read;
     }
+}
+
+sealed class TestClaudeTokenStore(ClaudeTokens? initial = null) : IClaudeTokenStore
+{
+    private ClaudeTokens? _tokens = initial;
+    public ClaudeTokens? Load() => _tokens;
+    public void Save(ClaudeTokens tokens) => _tokens = tokens;
+    public void Delete() => _tokens = null;
+}
+sealed class TestHttpHandler(Func<HttpRequestMessage, int, Task<HttpResponseMessage>> respond) : HttpMessageHandler
+{
+    public int Calls { get; private set; }
+    protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) => respond(request, ++Calls);
 }

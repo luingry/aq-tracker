@@ -1,9 +1,11 @@
 using System.Runtime.InteropServices;
 using System.IO;
+using CodexTracker.Core;
 
 namespace CodexTracker;
 
 public readonly record struct CodexDesktopWindowState(bool IsForeground, bool IsMinimized);
+public readonly record struct DesktopWindowState(AgentProvider? Provider, bool IsMinimized);
 
 public static class CodexDesktopWindowMonitor
 {
@@ -13,13 +15,45 @@ public static class CodexDesktopWindowMonitor
 
     public static CodexDesktopWindowState Read()
     {
+        var state = ReadForeground();
+        return state.Provider == AgentProvider.Codex ? new(true, state.IsMinimized) : default;
+    }
+
+    public static DesktopWindowState ReadForeground()
+    {
         var foreground = GetForegroundWindow();
         if (foreground == IntPtr.Zero) return default;
         var root = GetAncestor(foreground, GaRoot);
         if (root == IntPtr.Zero) root = foreground;
         GetWindowThreadProcessId(root, out var processId);
         var path = TryGetProcessPath(processId);
-        return Observe(path, IsWindowVisible(root), TryIsCloaked(root), IsIconic(root));
+        return ObserveForeground(path, IsWindowVisible(root), TryIsCloaked(root), IsIconic(root));
+    }
+
+    public static DesktopWindowState ObserveForeground(string? path, bool isVisible, bool isCloaked, bool isMinimized) =>
+        !isVisible || isCloaked ? default : IsCodexDesktopExecutable(path) ? new(AgentProvider.Codex, isMinimized)
+            : IsClaudeDesktopExecutable(path) ? new(AgentProvider.Claude, isMinimized) : default;
+
+    public static bool IsClaudeDesktopExecutable(string? path)
+    {
+        if (string.IsNullOrWhiteSpace(path) || !string.Equals(Path.GetFileName(path), "Claude.exe", StringComparison.OrdinalIgnoreCase)) return false;
+        var normalized = path!.Replace('/', '\\');
+        if (normalized.IndexOf("\\Claude\\claude-code\\", StringComparison.OrdinalIgnoreCase) >= 0) return false;
+        return normalized.IndexOf("\\WindowsApps\\Claude_", StringComparison.OrdinalIgnoreCase) >= 0 ||
+               normalized.IndexOf("\\AnthropicClaude\\", StringComparison.OrdinalIgnoreCase) >= 0;
+    }
+
+    public static void BringClaudeToFront()
+    {
+        EnumWindows((window, _) =>
+        {
+            if (!IsWindowVisible(window) || TryIsCloaked(window)) return true;
+            GetWindowThreadProcessId(window, out var pid);
+            if (!IsClaudeDesktopExecutable(TryGetProcessPath(pid))) return true;
+            if (IsIconic(window)) ShowWindow(window, 9);
+            SetForegroundWindow(window);
+            return false;
+        }, IntPtr.Zero);
     }
 
     public static CodexDesktopWindowState Observe(string? path, bool isVisible, bool isCloaked, bool isMinimized) =>
@@ -65,6 +99,10 @@ public static class CodexDesktopWindowMonitor
     [DllImport("user32.dll")] private static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint processId);
     [DllImport("user32.dll")] private static extern bool IsWindowVisible(IntPtr hWnd);
     [DllImport("user32.dll")] private static extern bool IsIconic(IntPtr hWnd);
+    private delegate bool EnumWindowCallback(IntPtr window, IntPtr parameter);
+    [DllImport("user32.dll")] private static extern bool EnumWindows(EnumWindowCallback callback, IntPtr parameter);
+    [DllImport("user32.dll")] private static extern bool ShowWindow(IntPtr window, int command);
+    [DllImport("user32.dll")] private static extern bool SetForegroundWindow(IntPtr window);
     [DllImport("dwmapi.dll")] private static extern int DwmGetWindowAttribute(IntPtr hWnd, int attribute, out int value, int valueSize);
     [DllImport("kernel32.dll", SetLastError = true)] private static extern IntPtr OpenProcess(uint access, bool inheritHandle, uint processId);
     [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)] private static extern bool QueryFullProcessImageName(IntPtr process, uint flags, System.Text.StringBuilder path, ref int size);

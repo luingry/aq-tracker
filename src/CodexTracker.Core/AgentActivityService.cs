@@ -15,7 +15,8 @@ public sealed record ActiveAgent(
     string Effort,
     DateTimeOffset StartedAt,
     DateTimeOffset LastActivityAt,
-    string? ProjectPath = null);
+    string? ProjectPath = null,
+    AgentProvider Provider = AgentProvider.Codex);
 
 public sealed record CompletedAgentWork(
     string CompletionId,
@@ -27,7 +28,8 @@ public sealed record CompletedAgentWork(
     string Effort,
     DateTimeOffset StartedAt,
     DateTimeOffset CompletedAt,
-    string? ProjectPath = null);
+    string? ProjectPath = null,
+    AgentProvider Provider = AgentProvider.Codex);
 
 public sealed record AgentActivitySnapshot(
     IReadOnlyList<ActiveAgent> ActiveAgents,

@@ -82,13 +82,15 @@ public partial class MainWindow : Window
     [Flags]
     private enum ResizeEdge { None = 0, Left = 1, Top = 2, Right = 4, Bottom = 8 }
 
-    public MainWindow(bool demo = false)
+    public MainWindow(bool demo = false, SettingsStore? settingsStore = null)
     {
+        if (settingsStore is not null) _store = settingsStore;
         _settings = _store.Load();
         _unreadAgentWorks = (_settings.UnreadAgentWorks ?? []).OrderByDescending(work => work.CompletedAt).ToList();
         _observedCompletionIds.UnionWith(_unreadAgentWorks.Select(work => work.CompletionId));
         LocalizationManager.Apply(_settings.LanguageCode);
         _viewModel = new MainViewModel(new QuotaSnapshotStore());
+        InitializeClaude();
         InitializeComponent();
         AddHandler(Mouse.PreviewMouseDownEvent, new MouseButtonEventHandler(OnWindowPreviewMouseDown), true);
         AddHandler(Mouse.PreviewMouseMoveEvent, new System.Windows.Input.MouseEventHandler(OnWindowPreviewMouseMove), true);
@@ -105,13 +107,13 @@ public partial class MainWindow : Window
         _demo = demo;
         _pendingAccentColor = _settings.AccentColor;
         Topmost = _settings.IsTopmost;
-        ThemeManager.Apply(_settings.Theme, _settings.AccentColor);
+        ApplyProfileTheme(_settings.Theme, _settings.AccentColor, _settings.ClaudeAccentColor);
         _viewModel.Topmost = Topmost;
         _viewModel.SetCurrency(_settings.CurrencyCode);
         _viewModel.SetCompactQuotaDisplay(_settings.CompactQuotaDisplay);
         _viewModel.Expanded = _settings.IsExpanded;
         _viewModel.IsAgentListOpen = false;
-        _viewModel.ApplyUnreadCompletedAgents(_unreadAgentWorks);
+        _viewModel.ApplyUnreadCompletedAgents(VisibleUnreadWorks());
         ApplyWindowModeSize();
         Left = _settings.Left;
         Top = _settings.Top;
@@ -121,6 +123,7 @@ public partial class MainWindow : Window
             _agentTimer.Start();
             _visibilityTimer.Start();
             _ = LoadAsync();
+            _ = RefreshClaudeAsync();
             await RefreshAgentsAsync();
             UpdateWidgetVisibility();
             _ = RefreshAnalyticsAsync();
@@ -216,6 +219,7 @@ public partial class MainWindow : Window
     private async Task RefreshAsync()
     {
         _ = CheckForUpdatesIfDueAsync();
+        _ = RefreshClaudeAsync();
         if (_client is null) { await LoadAsync(); return; }
         try
         {
@@ -260,9 +264,11 @@ public partial class MainWindow : Window
         {
             var titles = new Dictionary<string, string>(_threadTitles, StringComparer.OrdinalIgnoreCase);
             var activityTask = Task.Run(() => _agentActivity.ReadSnapshot(titles));
-            await activityTask;
+            var claudeTask = Task.Run(() => _claudeActivity.ReadSnapshot());
+            await Task.WhenAll(activityTask, claudeTask);
+            var claude = claudeTask.Result;
             var activity = activityTask.Result;
-            var agents = activity.ActiveAgents;
+            var agents = activity.ActiveAgents.Concat(_settings.ClaudeProfileEnabled ? claude.ActiveAgents : []).ToArray();
             var unreadChanged = false;
             if (!_agentStateInitialized)
             {
@@ -277,13 +283,20 @@ public partial class MainWindow : Window
                     unreadChanged = true;
                 }
             }
-            var activeThreadIds = agents.Select(agent => agent.ThreadId).ToHashSet(StringComparer.OrdinalIgnoreCase);
-            if (_unreadAgentWorks.RemoveAll(work => activeThreadIds.Contains(work.ThreadId)) > 0) unreadChanged = true;
+            foreach (var completed in claude.CompletedAgentWorks)
+            {
+                if (!_observedCompletionIds.Add(completed.CompletionId) || !_settings.ClaudeProfileEnabled) continue;
+                _unreadAgentWorks.Add(completed);
+                unreadChanged = true;
+            }
+            var activeThreadIds = agents.Where(agent => agent.Provider == AgentProvider.Codex).Select(agent => agent.ThreadId).ToHashSet(StringComparer.OrdinalIgnoreCase);
+            if (_unreadAgentWorks.RemoveAll(work => work.Provider == AgentProvider.Codex && activeThreadIds.Contains(work.ThreadId) ||
+                ClaudeSessionActivityService.ShouldRemoveCompletion(work, claude.ActiveAgents, _claudeActivity.LastFocusedAt)) > 0) unreadChanged = true;
             if (unreadChanged) PersistUnreadAgentWorks();
             var previouslyVisibleIndicator = _viewModel.HasAgentIndicator;
             var previouslyActive = _viewModel.HasActiveAgents;
             _viewModel.ApplyAgents(agents, DateTimeOffset.UtcNow, AgentListPopup.IsOpen);
-            _viewModel.ApplyUnreadCompletedAgents(_unreadAgentWorks);
+            _viewModel.ApplyUnreadCompletedAgents(VisibleUnreadWorks());
             if (previouslyVisibleIndicator != _viewModel.HasAgentIndicator)
             {
                 if (!_viewModel.HasAgentIndicator) _viewModel.IsAgentListOpen = false;
@@ -296,7 +309,8 @@ public partial class MainWindow : Window
                 _ = Dispatcher.InvokeAsync(async () => { await Task.Delay(210); _viewModel.MarkNewAgentRowsStable(); });
 
             var now = DateTimeOffset.UtcNow;
-            var missingTitles = agents.Select(agent => agent.ThreadId).Concat(_unreadAgentWorks.Select(work => work.ThreadId))
+            var missingTitles = agents.Where(agent => agent.Provider == AgentProvider.Codex).Select(agent => agent.ThreadId)
+                .Concat(_unreadAgentWorks.Where(work => work.Provider == AgentProvider.Codex).Select(work => work.ThreadId))
                 .Where(id => !_threadTitles.ContainsKey(id) &&
                              (!_threadTitleLookups.TryGetValue(id, out var attemptedAt) || now - attemptedAt >= TimeSpan.FromMinutes(1)))
                 .ToArray();
@@ -321,6 +335,7 @@ public partial class MainWindow : Window
             for (var index = 0; index < _unreadAgentWorks.Count; index++)
             {
                 var work = _unreadAgentWorks[index];
+                if (work.Provider != AgentProvider.Codex) continue;
                 if (!titles.TryGetValue(work.ThreadId, out var title) || string.IsNullOrWhiteSpace(title) || string.Equals(work.Title, title, StringComparison.Ordinal)) continue;
                 _unreadAgentWorks[index] = work with { Title = title.Trim() };
                 unreadChanged = true;
@@ -328,7 +343,7 @@ public partial class MainWindow : Window
             if (unreadChanged)
             {
                 PersistUnreadAgentWorks();
-                _viewModel.ApplyUnreadCompletedAgents(_unreadAgentWorks);
+                _viewModel.ApplyUnreadCompletedAgents(VisibleUnreadWorks());
             }
         }
         catch (Exception exception) { SanitizedLogger.Write("Agent title refresh error: " + exception.GetType().Name); }
@@ -526,6 +541,12 @@ public partial class MainWindow : Window
 
     private void OpenAgentThread(object sender, RoutedEventArgs e)
     {
+        if (sender is System.Windows.Controls.Button { DataContext: AgentActivityRow { Provider: AgentProvider.Claude } claudeRow })
+        {
+            if (claudeRow.IsCompleted) MarkThreadRead(claudeRow.ThreadId, AgentProvider.Claude);
+            CodexDesktopWindowMonitor.BringClaudeToFront();
+            return;
+        }
         if (sender is not System.Windows.Controls.Button { CommandParameter: string threadId } || !CodexThreadDeepLink.TryCreate(threadId, out var deepLink) || deepLink is null)
         {
             SanitizedLogger.Write("Agent thread link rejected");
@@ -540,12 +561,12 @@ public partial class MainWindow : Window
         catch (Exception exception) { SanitizedLogger.Write("Agent thread link launch failed: " + exception.GetType().Name); }
     }
 
-    private void MarkThreadRead(string threadId)
+    private void MarkThreadRead(string threadId, AgentProvider provider = AgentProvider.Codex)
     {
-        if (_unreadAgentWorks.RemoveAll(work => string.Equals(work.ThreadId, threadId, StringComparison.OrdinalIgnoreCase)) == 0) return;
+        if (_unreadAgentWorks.RemoveAll(work => work.Provider == provider && string.Equals(work.ThreadId, threadId, StringComparison.OrdinalIgnoreCase)) == 0) return;
         PersistUnreadAgentWorks();
         var previouslyVisibleIndicator = _viewModel.HasAgentIndicator;
-        _viewModel.ApplyUnreadCompletedAgents(_unreadAgentWorks);
+        _viewModel.ApplyUnreadCompletedAgents(VisibleUnreadWorks());
         if (previouslyVisibleIndicator != _viewModel.HasAgentIndicator) ApplyCompactAgentIndicatorSize();
         if (!_viewModel.HasAgentIndicator) _viewModel.IsAgentListOpen = false;
     }
@@ -573,12 +594,18 @@ public partial class MainWindow : Window
     private void UpdateWidgetVisibility()
     {
         if (_demo || !IsLoaded) return;
-        var codex = CodexDesktopWindowMonitor.Read();
+        var desktop = CodexDesktopWindowMonitor.ReadForeground();
+        var codex = new ProfileActivity(desktop.Provider == AgentProvider.Codex, desktop.IsMinimized,
+            _viewModel.ActiveAgents.Any(row => row.Provider == AgentProvider.Codex),
+            _unreadAgentWorks.Any(work => work.Provider == AgentProvider.Codex));
+        var claude = _settings.ClaudeProfileEnabled ? new ProfileActivity(desktop.Provider == AgentProvider.Claude, desktop.IsMinimized,
+            _viewModel.ActiveAgents.Any(row => row.Provider == AgentProvider.Claude),
+            _unreadAgentWorks.Any(work => work.Provider == AgentProvider.Claude)) : default;
+        _viewModel.SetProfileActivity(codex, claude);
+        if (claude.IsEngaged && !_wasClaudeEngaged) _ = RefreshClaudeAsync(onlyIfStale: true);
+        _wasClaudeEngaged = claude.IsEngaged;
         var shouldShow = WidgetVisibilityPolicy.ShouldShow(
-            _viewModel.HasActiveAgents,
-            _viewModel.HasUnreadCompletedAgents,
-            codex.IsForeground,
-            codex.IsMinimized,
+            codex, claude,
             IsActive || AgentListPopup.IsOpen);
         if (shouldShow)
         {
@@ -689,10 +716,12 @@ public partial class MainWindow : Window
             CaptureCurrentModeSize();
             SettingsPanel.Visibility = Visibility.Collapsed;
             _pendingAccentColor = _settings.AccentColor;
+            _pendingClaudeAccentColor = _settings.ClaudeAccentColor;
             LocalizationManager.Apply(_settings.LanguageCode);
             _viewModel.RefreshLocalization();
             CreateTray();
-            ThemeManager.Apply(_settings.Theme, _settings.AccentColor);
+            CancelClaudeLogin();
+            ApplyProfileTheme(_settings.Theme, _settings.AccentColor, _settings.ClaudeAccentColor);
             ApplyBackdrop(_settings.Theme);
             ApplyWindowModeSize();
             Save();
@@ -701,11 +730,16 @@ public partial class MainWindow : Window
         }
 
         _viewModel.UpdateCheckFeedback = "";
+        _pendingAccentColor = _settings.AccentColor;
+        _pendingClaudeAccentColor = _settings.ClaudeAccentColor;
         DetailedBox.IsChecked = _viewModel.Expanded;
         TopmostBox.IsChecked = Topmost;
         ThemeToggle.IsChecked = _settings.Theme == "Escuro";
         LanguageBox.SelectedIndex = LocalizationManager.NormalizeLanguage(_settings.LanguageCode) == "en-US" ? 1 : 0;
         _pendingAccentColor = _settings.AccentColor;
+        _pendingClaudeAccentColor = _settings.ClaudeAccentColor;
+        ClaudeEnabledBox.IsChecked = _settings.ClaudeProfileEnabled;
+        UpdateClaudeAccentPreview();
         UpdateAccentPreview();
         CurrencyBox.SelectedIndex = SettingsStore.NormalizeCurrency(_settings.CurrencyCode) == "USD" ? 1 : 0;
         CompactQuotaBox.SelectedIndex = _settings.CompactQuotaDisplay == "5h" ? 0 : _settings.CompactQuotaDisplay == "7d" ? 1 : 2;
@@ -765,13 +799,19 @@ public partial class MainWindow : Window
         var manualCodexPath = CodexPathFallbackPanel.Visibility == Visibility.Visible
             ? string.IsNullOrWhiteSpace(PathBox.Text) ? null : PathBox.Text
             : _settings.CodexPath;
-        _settings = _settings with { CodexPath = manualCodexPath, UsdBrl = rate > 0 ? rate : 5.5m, Theme = theme, CurrencyCode = currency, AccentColor = AccentPalette.Normalize(_pendingAccentColor), LanguageCode = language, CompactQuotaDisplay = compactQuotaDisplay };
+        CancelClaudeLogin();
+        _settings = _settings with { CodexPath = manualCodexPath, UsdBrl = rate > 0 ? rate : 5.5m, Theme = theme, CurrencyCode = currency, AccentColor = AccentPalette.Normalize(_pendingAccentColor), LanguageCode = language, CompactQuotaDisplay = compactQuotaDisplay,
+            ClaudeProfileEnabled = ClaudeEnabledBox.IsChecked != false, ClaudeAccentColor = AccentPalette.Normalize(_pendingClaudeAccentColor) };
         LocalizationManager.Apply(language);
-        ThemeManager.Apply(theme, _settings.AccentColor);
+        ApplyProfileTheme(theme, _settings.AccentColor, _settings.ClaudeAccentColor);
         CreateTray();
         ApplyBackdrop(theme);
         _viewModel.SetCurrency(currency);
         _viewModel.SetCompactQuotaDisplay(compactQuotaDisplay);
+        _viewModel.SetClaudeEnabled(_settings.ClaudeProfileEnabled);
+        _viewModel.ApplyUnreadCompletedAgents(VisibleUnreadWorks());
+        _ = RefreshAgentsAsync();
+        _ = RefreshClaudeAsync();
         _viewModel.RefreshLocalization();
         _viewModel.Expanded = DetailedBox.IsChecked == true;
         Topmost = TopmostBox.IsChecked == true;
@@ -788,7 +828,7 @@ public partial class MainWindow : Window
     private void PreviewTheme(object sender, RoutedEventArgs e)
     {
         var theme = ThemeToggle.IsChecked == true ? "Escuro" : "Claro";
-        ThemeManager.Apply(theme, _pendingAccentColor);
+        ApplyProfileTheme(theme, _pendingAccentColor, _pendingClaudeAccentColor);
         ApplyBackdrop(theme);
     }
     private void ApplyBackdrop(string theme)
@@ -1194,6 +1234,8 @@ public partial class MainWindow : Window
         _agentTimer.Stop();
         _visibilityTimer.Stop();
         _shutdown.Cancel();
+        CancelClaudeLogin();
+        _claudeClient.Dispose();
         _updateInstallCancellation?.Cancel();
         _client?.DisposeAsync().AsTask().GetAwaiter().GetResult();
         _updates.Dispose();

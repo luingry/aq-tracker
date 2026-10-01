@@ -1,5 +1,26 @@
 # Erros e solucoes conhecidas
 
+## Callback OAuth indisponível em ambiente com HttpListener não suportado
+
+- **Sintoma:** um smoke adicional do callback real retornou `PlatformNotSupportedException` no construtor de `HttpListener`; a consulta do framework confirmou `HttpListener.IsSupported=false` neste ambiente, apesar do serviço HTTP do Windows estar em execução.
+- **Causa:** o runtime não disponibilizava a API do listener no ambiente de execução restrito. O serviço HTTP em execução não prova que a API esteja utilizável pelo processo.
+- **Solução:** Conectar Claude oferece automaticamente o fluxo manual quando `IsSupported` é falso ou o listener não pode iniciar. A validação de método, rota, código e state é pura e testada independentemente; o smoke de rede local é condicionado ao suporte da plataforma.
+- **Prevenção:** não exija listener local para autorizar a integração. Preserve PKCE e state também no fallback; informe a limitação de ambiente quando o callback físico não puder ser exercitado.
+
+## Rotação atômica de tokens DPAPI falhava ao copiar metadados do arquivo
+
+- **Sintoma:** a primeira gravação cifrada funcionava, mas o teste de substituição dos tokens retornava `UnauthorizedAccessException` em `File.Replace` no diretório temporário do ambiente restrito.
+- **Causa:** a substituição padrão também tenta copiar metadados do destino; essa etapa falhava no ambiente, embora a escrita dos bytes e o round-trip DPAPI estivessem permitidos.
+- **Solução:** a gravação atômica usa `File.Replace(..., ignoreMetadataErrors: true)`, conserva o destino até a substituição e remove arquivos temporários em `finally`. O teste real confirma a rotação, a decifragem e a ausência de temporários.
+- **Prevenção:** teste duas gravações consecutivas, não apenas o primeiro save. Nunca contorne a falha removendo o destino antes de gravar, pois isso elimina a atomicidade e pode perder o refresh token.
+
+## Identidade de agents precisa incluir o provedor ao integrar Claude
+
+- **Sintoma:** durante a integração, a reconciliação antiga por `ThreadId` permitiria que uma sessão Claude reativada removesse uma conclusão Codex com o mesmo id; títulos vindos do app-server também poderiam ser aplicados à linha errada.
+- **Causa:** a identidade anterior pressupunha uma única fonte de sessões. O estado de animação global também passou a incluir trabalho Claude ao mesclar as listas.
+- **Solução:** linhas, persistência e marcação de leitura agora usam provedor + id. A busca de títulos e a remoção automática do Codex continuam limitadas ao Codex; o Claude confirma leitura somente pela própria sessão. Os gauges detalhados do Codex usam exclusivamente o trabalho Codex.
+- **Prevenção:** mantenha fixtures com ids iguais entre provedores e trabalho simultâneo. Não use foco ou índices globais do Codex como confirmação de leitura de um chat.
+
 ## Quota semanal assumia sempre o slot primary
 
 - **Sintoma:** contas em que o limite de 5h ocupava `primary` e o semanal ocupava `secondary` mostravam o indicador semanal ausente ou registravam o limite errado no histórico diário.

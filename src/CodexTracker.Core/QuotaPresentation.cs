@@ -5,7 +5,7 @@ namespace CodexTracker.Core;
 /// <summary>Formats the peripheral quota number without changing protocol semantics.</summary>
 public static class QuotaPresentation
 {
-    public static string FormatWeeklyRemaining(QuotaWindow? weekly) => weekly is null
+    public static string FormatWeeklyRemaining(QuotaWindow? weekly) => weekly is null || !weekly.HasUsage
         ? "--"
         : FormatPercent(weekly.RemainingPercent);
 

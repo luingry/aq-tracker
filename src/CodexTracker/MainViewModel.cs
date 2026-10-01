@@ -66,6 +66,7 @@ public sealed class AgentActivityRow : INotifyPropertyChanged
 
     public void Update(CompletedAgentWork work)
     {
+        Provider = work.Provider;
         CompletionId = work.CompletionId;
         _sourceType = work.Type;
         _sourceTitle = work.Title;
@@ -78,6 +79,9 @@ public sealed class AgentActivityRow : INotifyPropertyChanged
     }
 
     public string ThreadId { get; }
+    public AgentProvider Provider { get; private set; }
+    public string IdentityKey => Provider + ":" + ThreadId;
+    public bool IsClaude => Provider == AgentProvider.Claude;
     public string? CompletionId { get; private set; }
     public string? ParentThreadId => _parentThreadId;
     public int HierarchyDepth => _hierarchyDepth;
@@ -96,6 +100,7 @@ public sealed class AgentActivityRow : INotifyPropertyChanged
 
     public void Update(ActiveAgent agent, DateTimeOffset now)
     {
+        Provider = agent.Provider;
         CompletionId = null;
         Set(ref _parentThreadId, agent.ParentThreadId, nameof(ParentThreadId));
         Set(ref _hierarchyDepth, agent.HierarchyDepth, nameof(HierarchyDepth));
@@ -148,7 +153,7 @@ public sealed class AgentActivityRow : INotifyPropertyChanged
     }
 }
 
-public sealed class MainViewModel : INotifyPropertyChanged
+public sealed partial class MainViewModel : INotifyPropertyChanged
 {
     public event PropertyChangedEventHandler? PropertyChanged;
     private string _weekly = "--", _fiveHour = "--", _fiveHourReset = "", _weeklyTokens = "--", _weeklyCost = "--", _reset = LocalizationManager.Text("LoadingWeeklyQuota"), _today = "--", _month = "--", _cost = "--", _todayCost = "--", _monthCost = "--", _coverage = "", _forecast = LocalizationManager.Text("InsufficientData"), _status = LocalizationManager.Text("Loading"), _currencyCode = "BRL", _compactQuotaDisplay = "both";
@@ -246,8 +251,8 @@ public sealed class MainViewModel : INotifyPropertyChanged
     public double RemainingPercent { get => _remainingPercent; set => Set(ref _remainingPercent, value); }
     public double FiveHourRemainingPercent { get => _fiveHourRemainingPercent; private set => Set(ref _fiveHourRemainingPercent, value); }
     public bool HasFiveHourQuota { get => _hasFiveHourQuota; private set => Set(ref _hasFiveHourQuota, value); }
-    public bool ShowCompactFiveHour => HasFiveHourQuota && _compactQuotaDisplay is "5h" or "both";
-    public bool ShowCompactWeekly => _compactQuotaDisplay is "7d" or "both";
+    public bool ShowCompactFiveHour => _profileGauges.Count == 2 || _profileGauges.Count == 1 && _profileGauges[0].Window == "5h";
+    public bool ShowCompactWeekly => _profileGauges.Count == 2 || _profileGauges.Count == 1 && _profileGauges[0].Window == "7d";
     public int CompactQuotaCount => (ShowCompactFiveHour ? 1 : 0) + (ShowCompactWeekly ? 1 : 0);
     public bool IsUpdateDialogOpen { get => _isUpdateDialogOpen; set => Set(ref _isUpdateDialogOpen, value); }
     public bool IsUpdateDownloading { get => _isUpdateDownloading; set => Set(ref _isUpdateDownloading, value); }
@@ -275,6 +280,7 @@ public sealed class MainViewModel : INotifyPropertyChanged
         var normalized = SettingsStore.NormalizeCompactQuotaDisplay(display);
         if (_compactQuotaDisplay == normalized) return;
         _compactQuotaDisplay = normalized;
+        RefreshProfilePresentation();
         PropertyChanged?.Invoke(this, new(nameof(ShowCompactFiveHour)));
         PropertyChanged?.Invoke(this, new(nameof(ShowCompactWeekly)));
         PropertyChanged?.Invoke(this, new(nameof(CompactQuotaCount)));
@@ -283,17 +289,17 @@ public sealed class MainViewModel : INotifyPropertyChanged
     public void ApplyAgents(IReadOnlyList<ActiveAgent> agents, DateTimeOffset now, bool animateNewRows, bool? animationsEnabled = null)
     {
         var hasActiveAgents = agents.Count > 0;
-        var existing = ActiveAgents.ToDictionary(row => row.ThreadId, StringComparer.OrdinalIgnoreCase);
+        var existing = ActiveAgents.ToDictionary(row => row.IdentityKey, StringComparer.OrdinalIgnoreCase);
         var completedByThread = _completedAgentRows
-            .GroupBy(row => row.ThreadId, StringComparer.OrdinalIgnoreCase)
+            .GroupBy(row => row.IdentityKey, StringComparer.OrdinalIgnoreCase)
             .ToDictionary(group => group.Key, group => group.First(), StringComparer.OrdinalIgnoreCase);
-        var activeThreadIds = agents.Select(agent => agent.ThreadId).ToHashSet(StringComparer.OrdinalIgnoreCase);
-        _completedAgentRows = _completedAgentRows.Where(row => !activeThreadIds.Contains(row.ThreadId)).ToArray();
+        var activeThreadIds = agents.Select(agent => agent.Provider + ":" + agent.ThreadId).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        _completedAgentRows = _completedAgentRows.Where(row => !activeThreadIds.Contains(row.IdentityKey)).ToArray();
         var ordered = new List<AgentActivityRow>(agents.Count);
         foreach (var agent in agents)
         {
-            if (existing.TryGetValue(agent.ThreadId, out var row)) row.Update(agent, now);
-            else if (completedByThread.TryGetValue(agent.ThreadId, out row)) row.Update(agent, now);
+            if (existing.TryGetValue(agent.Provider + ":" + agent.ThreadId, out var row)) row.Update(agent, now);
+            else if (completedByThread.TryGetValue(agent.Provider + ":" + agent.ThreadId, out row)) row.Update(agent, now);
             else row = new AgentActivityRow(agent, now, animateNewRows && (animationsEnabled ?? SystemParameters.ClientAreaAnimation));
             ordered.Add(row);
         }
@@ -317,24 +323,24 @@ public sealed class MainViewModel : INotifyPropertyChanged
 
     public void ApplyAgentTitles(IReadOnlyDictionary<string, string> titles)
     {
-        foreach (var row in ActiveAgents)
+        foreach (var row in ActiveAgents.Where(row => row.Provider == AgentProvider.Codex))
             if (titles.TryGetValue(row.ThreadId, out var title)) row.UpdateTitle(title);
     }
 
     public void ApplyUnreadCompletedAgents(IReadOnlyList<CompletedAgentWork> works)
     {
-        var activeThreadIds = ActiveAgents.Select(row => row.ThreadId).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var activeThreadIds = ActiveAgents.Select(row => row.IdentityKey).ToHashSet(StringComparer.OrdinalIgnoreCase);
         var existing = _completedAgentRows
-            .GroupBy(row => row.ThreadId, StringComparer.OrdinalIgnoreCase)
+            .GroupBy(row => row.IdentityKey, StringComparer.OrdinalIgnoreCase)
             .ToDictionary(group => group.Key, group => group.First(), StringComparer.OrdinalIgnoreCase);
         _completedAgentRows = works
-            .Where(work => !string.Equals(work.Type, "Subagent", StringComparison.OrdinalIgnoreCase) && !activeThreadIds.Contains(work.ThreadId))
-            .GroupBy(work => work.ThreadId, StringComparer.OrdinalIgnoreCase)
+            .Where(work => !string.Equals(work.Type, "Subagent", StringComparison.OrdinalIgnoreCase) && !activeThreadIds.Contains(work.Provider + ":" + work.ThreadId))
+            .GroupBy(work => work.Provider + ":" + work.ThreadId, StringComparer.OrdinalIgnoreCase)
             .Select(group => group.OrderByDescending(work => work.CompletedAt).First())
             .OrderByDescending(work => work.CompletedAt)
             .Select(work =>
             {
-                if (!existing.TryGetValue(work.ThreadId, out var row)) return new AgentActivityRow(work);
+                if (!existing.TryGetValue(work.Provider + ":" + work.ThreadId, out var row)) return new AgentActivityRow(work);
                 row.Update(work);
                 return row;
             })
@@ -446,6 +452,8 @@ public sealed class MainViewModel : INotifyPropertyChanged
 
     private void ApplyCompactQuotaWindows(IEnumerable<QuotaWindow> windows)
     {
+        _codexWindows = windows.ToArray();
+        RefreshProfilePresentation();
         var fiveHour = OfficialCodexQuotaWindows.FiveHours(windows);
         HasFiveHourQuota = fiveHour is not null;
         FiveHour = QuotaPresentation.FormatWeeklyRemaining(fiveHour);
@@ -606,6 +614,7 @@ public sealed class MainViewModel : INotifyPropertyChanged
         if (_lastForecast is { } forecast) ApplyForecast(forecast);
         else Forecast = LocalizationManager.Text("InsufficientData");
         Status = LocalizationManager.TranslateKnown(Status);
+        NotifyProfileProperties();
         PropertyChanged?.Invoke(this, new(nameof(UpdateAvailableMessage)));
         foreach (var row in ActiveAgents) row.RefreshLocalization();
         foreach (var row in AgentItems.Where(row => row.IsCompleted)) row.RefreshLocalization();
