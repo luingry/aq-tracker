@@ -4,7 +4,7 @@ using AqTracker.Core;
 
 namespace AqTracker;
 
-public sealed record AppSettings(double Left = 80, double Top = 80, double Width = 62, double Height = 52, bool IsExpanded = false, bool IsTopmost = true, string? CodexPath = null, decimal UsdBrl = 5.50m, string Theme = "Escuro", string CurrencyCode = "BRL", WidgetModeSizes? ModeSizes = null, bool IsAgentListExpanded = false, string AccentColor = AccentPalette.DefaultBaseHex, string LanguageCode = LocalizationManager.DefaultLanguageCode, IReadOnlyList<CompletedAgentWork>? UnreadAgentWorks = null, DateTimeOffset? LastUpdateCheckUtc = null, string? DeferredUpdateVersion = null, DateTimeOffset? UpdateDeferredAtUtc = null, string CompactQuotaDisplay = "both", bool ClaudeProfileEnabled = true, string ClaudeAccentColor = "#D97757", bool StartMinimizedWithWindows = false, bool ShowInNotificationArea = false, bool FadeFloatingWidget = false);
+public sealed record AppSettings(double Left = 80, double Top = 80, double Width = 62, double Height = 52, bool IsExpanded = false, bool IsTopmost = true, string? CodexPath = null, decimal UsdBrl = 5.50m, string Theme = "Escuro", string CurrencyCode = "BRL", WidgetModeSizes? ModeSizes = null, bool IsAgentListExpanded = false, string AccentColor = AccentPalette.DefaultBaseHex, string LanguageCode = LocalizationManager.DefaultLanguageCode, IReadOnlyList<CompletedAgentWork>? UnreadAgentWorks = null, DateTimeOffset? LastUpdateCheckUtc = null, string? DeferredUpdateVersion = null, DateTimeOffset? UpdateDeferredAtUtc = null, string CompactQuotaDisplay = "both", bool ClaudeProfileEnabled = true, string ClaudeAccentColor = "#D97757", bool StartMinimizedWithWindows = false, bool ShowInNotificationArea = false, bool FadeFloatingWidget = false, int FloatingOpacityPercent = 50);
 public sealed class SettingsStore
 {
     private readonly string _path;
@@ -65,6 +65,7 @@ public sealed class SettingsStore
         var active = WidgetSizePolicy.Get(slots, settings.IsExpanded ? WidgetVisualMode.Detailed : WidgetVisualMode.Compact);
         return settings with
         {
+            FloatingOpacityPercent = Math.Max(10, Math.Min(90, settings.FloatingOpacityPercent)),
             CurrencyCode = CurrencyPresentation.Normalize(settings.CurrencyCode),
             AccentColor = AccentPalette.Normalize(settings.AccentColor),
             ClaudeAccentColor = AccentPalette.Normalize(settings.ClaudeAccentColor ?? "#D97757"),

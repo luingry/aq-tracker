@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.28.0] - 2026-10-02
+
+### Added
+
+- A themed opacity slider appears below the enabled floating-widget fade switch. Choose 10% to 90%, persisted across restarts, for both the compact widget and agent list; hover still restores full opacity. Existing preferences default to 50%.
+
 ## [0.27.2] - 2026-10-02
 
 This release consolidates the unpublished changes since 0.25.1.

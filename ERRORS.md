@@ -445,4 +445,3 @@
 - **Causa:** o teste pressupunha a existencia de artifacts, presente localmente mas ausente no checkout novo.
 - **Solucao:** criar explicitamente o diretorio antes de salvar notification-icons.png.
 - **Prevencao:** testes que produzem evidencias devem criar seus proprios diretorios de saida.
-

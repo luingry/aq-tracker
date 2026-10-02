@@ -270,6 +270,7 @@ var legacyCompact = SettingsStore.Normalize(new AppSettings(Width: 124, Height: 
 Assert(WidgetSizePolicy.Get(legacyCompact.ModeSizes!, WidgetVisualMode.Compact) == new WidgetSize(100, 100 / (62d / 52d)) && WidgetSizePolicy.Get(legacyCompact.ModeSizes!, WidgetVisualMode.Detailed) == WidgetSizePolicy.Default(WidgetVisualMode.Detailed), "legacy compact JSON migrates and clamps its dimensions only into compact");
 var legacyDetailed = SettingsStore.Normalize(new AppSettings(Width: 222, Height: 480, IsExpanded: true));
 Assert(WidgetSizePolicy.Get(legacyDetailed.ModeSizes!, WidgetVisualMode.Detailed) == new WidgetSize(300, 480) && WidgetSizePolicy.Get(legacyDetailed.ModeSizes!, WidgetVisualMode.Compact) == WidgetSizePolicy.Default(WidgetVisualMode.Compact), "legacy detailed JSON migrates its dimensions only into detailed");
+Assert(SettingsStore.Normalize(new AppSettings(FloatingOpacityPercent: -1)).FloatingOpacityPercent == 10 && SettingsStore.Normalize(new AppSettings(FloatingOpacityPercent: 101)).FloatingOpacityPercent == 90, "persisted opacity is constrained to 10 through 90 percent");
 var missingSizes = SettingsStore.Normalize(new AppSettings(ModeSizes: null));
 Assert(missingSizes.ModeSizes is not null && WidgetSizePolicy.Get(missingSizes.ModeSizes, WidgetVisualMode.Settings) == WidgetSizePolicy.Default(WidgetVisualMode.Settings), "absent mode slots receive safe defaults");
 var serializedSettings = legacyDetailed with { ModeSizes = new WidgetModeSizes(new(100, 1), new(300, 500), new(300, 650)) };
@@ -1976,19 +1977,52 @@ var claudeUiThread = new Thread(() =>
             encoder.Save(output);
         }
         ((System.Windows.Controls.CheckBox)window.FindName("NotificationAreaBox")).IsChecked = true;
-        ((System.Windows.Controls.CheckBox)window.FindName("FadeWidgetBox")).IsChecked = true;
+        var fadeBox = (System.Windows.Controls.CheckBox)window.FindName("FadeWidgetBox");
+        var opacityRow = (System.Windows.FrameworkElement)window.FindName("FloatingOpacityRow");
+        var opacitySlider = (System.Windows.Controls.Slider)window.FindName("FloatingOpacitySlider");
+        Assert(opacityRow.Visibility == System.Windows.Visibility.Collapsed && opacitySlider.Value == 50, "opacity slider starts collapsed with the compatible 50 percent default");
+        fadeBox.IsChecked = true;
+        window.UpdateLayout();
+        Assert(opacityRow.IsVisible, "enabling fade reveals the opacity slider");
+        opacitySlider.Value = 0;
+        Assert(opacitySlider.Value == 10, "opacity slider clamps its minimum to 10 percent");
+        opacitySlider.Value = 100;
+        Assert(opacitySlider.Value == 90, "opacity slider clamps its maximum to 90 percent");
+        opacitySlider.Value = 30;
+        fadeBox.IsChecked = false;
+        Assert(opacityRow.Visibility == System.Windows.Visibility.Collapsed && opacitySlider.Value == 30, "disabling fade collapses its slider without discarding the selection");
+        fadeBox.IsChecked = true;
+        if (args.Contains("--capture-settings"))
+        {
+            var directory = Path.Combine(Path.GetDirectoryName(FindRepositoryFile("VERSION"))!, "artifacts");
+            Directory.CreateDirectory(directory);
+            var themeToggle = (System.Windows.Controls.CheckBox)window.FindName("ThemeToggle");
+            var previousTheme = themeToggle.IsChecked;
+            foreach (var dark in new[] { true, false })
+            {
+                themeToggle.IsChecked = dark;
+                window.UpdateLayout();
+                var bitmap = new System.Windows.Media.Imaging.RenderTargetBitmap((int)window.Width, (int)window.Height, 96, 96, System.Windows.Media.PixelFormats.Pbgra32);
+                bitmap.Render((System.Windows.Media.Visual)window.Content);
+                var encoder = new System.Windows.Media.Imaging.PngBitmapEncoder();
+                encoder.Frames.Add(System.Windows.Media.Imaging.BitmapFrame.Create(bitmap));
+                using var output = File.Create(Path.Combine(directory, dark ? "opacity-dark.png" : "opacity-light.png"));
+                encoder.Save(output);
+            }
+            themeToggle.IsChecked = previousTheme;
+        }
         startupBox.IsChecked = true;
         typeof(AqTracker.MainWindow).GetMethod("ApplySettings", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!.Invoke(window, [window, new System.Windows.RoutedEventArgs()]);
         Assert(new WindowsStartupRegistration(RuntimePaths.ExecutablePath, startupTestKey).IsEnabled && new SettingsStore(Path.Combine(claudeUiRoot, "settings.json")).Load().StartMinimizedWithWindows, "Settings Apply persists the switch and enables the actual isolated Run registration");
         var persisted = new SettingsStore(Path.Combine(claudeUiRoot, "settings.json")).Load();
-        Assert(persisted.ShowInNotificationArea && persisted.FadeFloatingWidget && !window.IsVisible, "notification mode and fade persist and applying hides the widget");
+        Assert(persisted.ShowInNotificationArea && persisted.FadeFloatingWidget && persisted.FloatingOpacityPercent == 30 && !window.IsVisible, "notification mode and fade persist and applying hides the widget");
         var flags = System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic;
         void InvokeWindow(string method) => typeof(AqTracker.MainWindow).GetMethod(method, flags)!.Invoke(window, null);
         InvokeWindow("ShowFromTray");
         vm.Expanded = false;
         hoverSurface.SetValue(mouseOverKey, false);
         RefreshModeSize();
-        Assert(window.IsVisible && window.Opacity == .5, "tray restores compact floating widget at half opacity");
+        Assert(window.IsVisible && window.Opacity == .3, "tray restores compact floating widget at selected opacity");
         hoverSurface.SetValue(mouseOverKey, true);
         InvokeWindow("UpdateFloatingOpacity");
         Assert(window.Opacity == 1, "hover restores full floating opacity");
@@ -2034,13 +2068,13 @@ var claudeUiThread = new Thread(() =>
 
         fadeSurface.SetValue(mouseOverKey, false);
         InvokeWindow("UpdateFloatingOpacity");
-        Assert(window.Opacity == .5 && fadeSurface.Opacity == .5, "agent popup and compact widget share half opacity outside hover");
+        Assert(window.Opacity == .3 && fadeSurface.Opacity == .3, "agent popup and compact widget share selected opacity outside hover");
         fadeSurface.SetValue(mouseOverKey, true);
         InvokeWindow("UpdateFloatingOpacity");
         Assert(window.Opacity == 1 && fadeSurface.Opacity == 1, "hovering agent list restores both surfaces to full opacity");
         fadeSurface.SetValue(mouseOverKey, false);
         InvokeWindow("UpdateFloatingOpacity");
-        Assert(window.Opacity == .5 && fadeSurface.Opacity == .5, "leaving the list fades both surfaces again");
+        Assert(window.Opacity == .3 && fadeSurface.Opacity == .3, "leaving the list fades both surfaces again");
         agentPopup.IsOpen = false;
         vm.Expanded = true;
         RefreshModeSize();

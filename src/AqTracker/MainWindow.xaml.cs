@@ -797,6 +797,7 @@ public partial class MainWindow : Window
         StartupBox.IsChecked = _windowsStartup.IsEnabled;
         NotificationAreaBox.IsChecked = _settings.ShowInNotificationArea;
         FadeWidgetBox.IsChecked = _settings.FadeFloatingWidget;
+        FloatingOpacitySlider.Value = _settings.FloatingOpacityPercent;
         TopmostBox.IsChecked = Topmost;
         ThemeToggle.IsChecked = _settings.Theme == "Escuro";
         LanguageBox.SelectedIndex = LocalizationManager.NormalizeLanguage(_settings.LanguageCode) == "en-US" ? 1 : 0;
@@ -867,7 +868,7 @@ public partial class MainWindow : Window
         var startupEnabled = StartupBox.IsChecked == true;
         _windowsStartup.SetEnabled(startupEnabled);
         _settings = _settings with { CodexPath = manualCodexPath, UsdBrl = rate > 0 ? rate : 5.5m, Theme = theme, CurrencyCode = currency, AccentColor = AccentPalette.Normalize(_pendingAccentColor), LanguageCode = language, CompactQuotaDisplay = compactQuotaDisplay,
-            ClaudeProfileEnabled = ClaudeEnabledBox.IsChecked != false, ClaudeAccentColor = AccentPalette.Normalize(_pendingClaudeAccentColor), StartMinimizedWithWindows = startupEnabled, ShowInNotificationArea = NotificationAreaBox.IsChecked == true, FadeFloatingWidget = FadeWidgetBox.IsChecked == true };
+            ClaudeProfileEnabled = ClaudeEnabledBox.IsChecked != false, ClaudeAccentColor = AccentPalette.Normalize(_pendingClaudeAccentColor), StartMinimizedWithWindows = startupEnabled, ShowInNotificationArea = NotificationAreaBox.IsChecked == true, FadeFloatingWidget = FadeWidgetBox.IsChecked == true, FloatingOpacityPercent = (int)FloatingOpacitySlider.Value };
         LocalizationManager.Apply(language);
         ApplyProfileTheme(theme, _settings.AccentColor, _settings.ClaudeAccentColor);
         CreateTray();
