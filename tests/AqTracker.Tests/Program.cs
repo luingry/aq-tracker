@@ -2101,7 +2101,9 @@ var claudeUiThread = new Thread(() =>
                 graphics.DrawIcon(icon, new System.Drawing.Rectangle(i * 64 + 24, 64, 16, 16));
             }
         }
-        preview.Save(Path.Combine(Path.GetDirectoryName(FindRepositoryFile("VERSION"))!, "artifacts", "notification-icons.png"));
+        var previewDirectory = Path.Combine(Path.GetDirectoryName(FindRepositoryFile("VERSION"))!, "artifacts");
+        Directory.CreateDirectory(previewDirectory);
+        preview.Save(Path.Combine(previewDirectory, "notification-icons.png"));
     }
     catch (Exception error) { claudeUiFailure = error; }
     finally { window?.Close(); application?.Shutdown(); }

@@ -19,6 +19,7 @@ This release consolidates the unpublished changes since 0.25.1.
 - Widgets opened from notification icons return to the tray when focus leaves the application; internal popups and dialogs retain the reveal.
 - The agent list follows Always on top across toggles, repositioning and reopening.
 - Notification-area and floating-widget fade settings use consistent vertical spacing.
+- Icon preview tests create their output directory on clean CI checkouts.
 
 ## [0.25.1] - 2026-10-02
 

@@ -438,3 +438,11 @@
 - **Causa:** `Popup` cria um HWND independente que o WPF marca como topmost; alterar `Window.Topmost` nao altera esse popup.
 - **Solucao:** sincronizar a faixa de Z-order do popup com `Topmost` usando `SetWindowPos` sem ativar ou mover, ao trocar a opcao, abrir e reposicionar a lista.
 - **Prevencao:** regressao WPF consulta `WS_EX_TOPMOST` nos HWNDs reais da janela e do popup, em ambos os valores, apos dez reposicionamentos e apos reabertura. Nao validar apenas a preferencia ou a propriedade gerenciada.
+
+## Preview de icones falhava no checkout limpo do CI
+
+- **Sintoma:** Image.Save encerrava o smoke WPF com erro generico de GDI+ no GitHub Actions.
+- **Causa:** o teste pressupunha a existencia de artifacts, presente localmente mas ausente no checkout novo.
+- **Solucao:** criar explicitamente o diretorio antes de salvar notification-icons.png.
+- **Prevencao:** testes que produzem evidencias devem criar seus proprios diretorios de saida.
+
