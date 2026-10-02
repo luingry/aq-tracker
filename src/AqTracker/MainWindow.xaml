@@ -234,6 +234,7 @@
         <ScrollViewer x:Name="DetailedScrollViewer" Visibility="{Binding Expanded, Converter={StaticResource BooleanToVisibility}}"
                       VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Margin="12">
           <StackPanel x:Name="DetailedContent" LayoutUpdated="DetailedContentLayoutUpdated">
+            <TextBlock Text="Codex" FontWeight="SemiBold" Foreground="{DynamicResource Accent}" />
             <Grid x:Name="DetailedFiveHourQuota" Margin="0,3,0,13" Visibility="{Binding HasFiveHourQuota, Converter={StaticResource BooleanToVisibility}}">
               <Grid.ColumnDefinitions><ColumnDefinition Width="76" /><ColumnDefinition /></Grid.ColumnDefinitions>
               <Grid Width="72" Height="72" HorizontalAlignment="Left">

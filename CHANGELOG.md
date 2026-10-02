@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.24.2] - 2026-10-02
+
+### Fixed
+
+- Detailed view identifies Codex above its quota indicators, using its accent color and matching the Claude heading without a connection status.
+
 ## [0.24.1] - 2026-10-01
 
 This release consolidates the unpublished changes since 0.21.0.
