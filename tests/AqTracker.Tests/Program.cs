@@ -286,12 +286,57 @@ try
     new SettingsStore(settingsTestPath).Save(persistedSettings);
     var reloadedSettings = new SettingsStore(settingsTestPath).Load();
     Assert(reloadedSettings.Left == 412.5 && reloadedSettings.Top == 237.25 && reloadedSettings.IsExpanded && !reloadedSettings.IsTopmost && reloadedSettings.CodexPath == @"C:\\Tools\\codex.exe" && reloadedSettings.UsdBrl == 5.89m && reloadedSettings.Theme == "Escuro" && reloadedSettings.CurrencyCode == "USD" && reloadedSettings.IsAgentListExpanded && reloadedSettings.AccentColor == "#FFB000" && reloadedSettings.LanguageCode == "en-US" && reloadedSettings.UnreadAgentWorks?.Single().CompletionId == "thread:new-turn", "settings round trip keeps only the latest unread execution per root chat while preserving existing preferences");
+    File.WriteAllText(settingsTestPath, "{\"Theme\":");
+    var recoveredSettings = new SettingsStore(settingsTestPath).Load();
+    Assert(recoveredSettings.Theme == "Escuro" && recoveredSettings.AccentColor == "#FFB000" && recoveredSettings.LanguageCode == "en-US", "an interrupted settings file recovers preferences from the latest valid backup instead of resetting setup");
+    File.Delete(settingsTestPath);
+    Assert(new SettingsStore(settingsTestPath).Load().Theme == "Escuro", "a missing primary settings file still recovers the backup");
+    File.WriteAllText(settingsTestPath, "null");
+    File.WriteAllText(settingsTestPath + ".bak", "{");
+    var rejectedCorruption = false;
+    try { new SettingsStore(settingsTestPath).Load(); }
+    catch (InvalidDataException) { rejectedCorruption = true; }
+    Assert(rejectedCorruption && File.ReadAllText(settingsTestPath) == "null", "unrecoverable settings never silently become defaults that overwrite user data");
+    var settingsStore = new SettingsStore(settingsTestPath);
+    settingsStore.Save(persistedSettings with { StartMinimizedWithWindows = true, ClaudeAccentColor = "#AA7755", ClaudeProfileEnabled = false });
+    Assert(settingsStore.Load().StartMinimizedWithWindows && !settingsStore.Load().ClaudeProfileEnabled && settingsStore.Load().ClaudeAccentColor == "#AA7755", "startup and Claude preferences survive an actual disk round trip");
+    var savedBytes = File.ReadAllBytes(settingsTestPath);
+    using (var lockedPrimary = new FileStream(settingsTestPath, FileMode.Open, FileAccess.ReadWrite, FileShare.None))
+    {
+        var loadRejected = false;
+        try { settingsStore.Load(); } catch (IOException) { loadRejected = true; }
+        Assert(loadRejected, "a transient sharing failure never loads defaults or an older backup");
+        var saveRejected = false;
+        try { settingsStore.Save(persistedSettings with { Theme = "Claro" }); } catch (IOException) { saveRejected = true; }
+        Assert(saveRejected, "a blocked atomic replacement fails without truncating the original settings");
+    }
+    Assert(savedBytes.SequenceEqual(File.ReadAllBytes(settingsTestPath)) && !Directory.GetFiles(settingsTestDirectory, "*.tmp").Any(), "failed replacement preserves exact primary bytes and cleans temporary files");
 }
 finally
 {
     if (Directory.Exists(settingsTestDirectory)) Directory.Delete(settingsTestDirectory, true);
 }
 Assert(!Directory.Exists(settingsTestDirectory), "temporary settings round-trip directory is removed after the test");
+var startupTestKey = @"Software\AqTracker.Tests\Startup-" + Guid.NewGuid().ToString("N");
+try
+{
+    var startup = new WindowsStartupRegistration(@"C:\Program Files\Agent Quota Tracker\AqTracker.exe", startupTestKey);
+    Assert(!startup.IsEnabled, "Windows startup is disabled for a fresh registration");
+    using (var key = Microsoft.Win32.Registry.CurrentUser.CreateSubKey(startupTestKey))
+    {
+        key.SetValue("UnrelatedApp", "leave-intact");
+        key.SetValue("CodexTracker", "old-tracker");
+    }
+    Assert(startup.IsEnabled, "the switch recognizes the legacy startup registration");
+    startup.SetEnabled(true);
+    using (var key = Microsoft.Win32.Registry.CurrentUser.OpenSubKey(startupTestKey))
+        Assert(startup.IsEnabled && (string?)key!.GetValue("AqTracker") == "\"" + @"C:\Program Files\Agent Quota Tracker\AqTracker.exe" + "\" --startup" && key.GetValue("CodexTracker") is null, "startup quotes paths with spaces, starts minimized and removes the duplicate legacy entry");
+    startup.SetEnabled(false);
+    startup.SetEnabled(false);
+    using (var key = Microsoft.Win32.Registry.CurrentUser.OpenSubKey(startupTestKey))
+        Assert(!startup.IsEnabled && (string?)key!.GetValue("UnrelatedApp") == "leave-intact", "disabling startup is idempotent and preserves other applications");
+}
+finally { Microsoft.Win32.Registry.CurrentUser.DeleteSubKeyTree(startupTestKey, throwOnMissingSubKey: false); }
 var migrationRoot = Path.Combine(Path.GetTempPath(), "AqTracker.Tests", "migration-" + Guid.NewGuid().ToString("N"));
 try
 {
@@ -428,7 +473,7 @@ Assert(mainWindowCode.Contains("LocalizationManager.Apply(_settings.LanguageCode
 var refreshAgentsStart = mainWindowCode.IndexOf("private async Task RefreshAgentsAsync", StringComparison.Ordinal);
 var refreshAgentsEnd = mainWindowCode.IndexOf("private void ToggleAgentList", refreshAgentsStart, StringComparison.Ordinal);
 var refreshAgentsCode = refreshAgentsStart >= 0 && refreshAgentsEnd > refreshAgentsStart ? mainWindowCode.Substring(refreshAgentsStart, refreshAgentsEnd - refreshAgentsStart) : string.Empty;
-Assert(refreshAgentsCode.Contains("else if (_settings.IsAgentListExpanded && !_viewModel.Expanded) _viewModel.IsAgentListOpen = true;", StringComparison.Ordinal), "agent refresh never opens the list while detailed mode is active");
+Assert(refreshAgentsCode.Contains("else if (!_startupHidden && _settings.IsAgentListExpanded && !_viewModel.Expanded) _viewModel.IsAgentListOpen = true;", StringComparison.Ordinal), "agent refresh never opens the list while detailed mode or minimized startup is active");
 Assert(mainWindowCode.Contains("_unreadAgentWorks[index] = work with { Title = title.Trim() };", StringComparison.Ordinal) && mainWindowCode.Contains("if (unreadChanged)", StringComparison.Ordinal) && mainWindowCode.Contains("PersistUnreadAgentWorks();", StringComparison.Ordinal), "late app-server titles replace and persist fallback titles for unread completed work");
 Assert(mainWindowCode.Contains("_viewModel.ApplyAgentTitles(titles);", StringComparison.Ordinal), "late app-server titles immediately update active agent rows instead of waiting for the next activity snapshot");
 Assert(mainWindowCode.Contains("work.Provider == AgentProvider.Codex && activeThreadIds.Contains(work.ThreadId)", StringComparison.Ordinal), "agent refresh permanently discards an old unread Codex completion when the same root chat starts running again");
@@ -1683,13 +1728,19 @@ var claudeUiThread = new Thread(() =>
     AqTracker.MainWindow? window = null;
     try
     {
-        application = new AqTracker.App();
+        application = new AqTracker.App(launchMainWindow: false);
         application.InitializeComponent();
-        window = new AqTracker.MainWindow(demo: true, settingsStore: new SettingsStore(Path.Combine(claudeUiRoot, "settings.json")));
+        window = new AqTracker.MainWindow(demo: true, settingsStore: new SettingsStore(Path.Combine(claudeUiRoot, "settings.json")), startMinimized: true,
+            windowsStartup: new WindowsStartupRegistration(RuntimePaths.ExecutablePath, startupTestKey));
         // Real layout requires a presentation source; keep the demo transparent and unfocused.
         window.Opacity = 0;
         window.Show();
         window.Dispatcher.Invoke(() => { }, System.Windows.Threading.DispatcherPriority.ApplicationIdle);
+        Assert(application.Windows.Count == 1 && ReferenceEquals(application.MainWindow, window), "WPF smoke owns only its isolated window and never starts a production tracker against real user preferences or Claude tokens");
+        Assert(!window.IsVisible && !window.ShowActivated, "Windows sign-in initializes the real WPF window hidden in the tray without stealing focus");
+        typeof(AqTracker.MainWindow).GetMethod("ShowFromTray", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!.Invoke(window, null);
+        Assert(window.IsVisible, "the tray Show action restores a tracker started minimized");
+        window.Opacity = 0;
         var vm = (MainViewModel)window.DataContext;
         vm.ApplyQuota(new(profileCodexWindows, null, null, null, claudeTestNow));
         vm.ApplyClaude(new(profileClaudeWindows, null, null, null, claudeTestNow), ClaudeConnectionState.Connected, true);
@@ -1802,6 +1853,24 @@ var claudeUiThread = new Thread(() =>
         vm.IsClaudeManualEntryOpen = true;
         Assert(Shown(manualPanel) && Shown(cancelButton) && !Shown(connectButton), "manual code entry replaces the connect actions with the code field and cancel");
         vm.IsClaudeManualEntryOpen = false;
+        typeof(AqTracker.MainWindow).GetMethod("Settings", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!.Invoke(window, [window, new System.Windows.RoutedEventArgs()]);
+        var startupBox = (System.Windows.Controls.CheckBox)window.FindName("StartupBox");
+        Assert(startupBox.IsVisible && startupBox.Template is not null && startupBox.IsChecked == false, "the startup switch is rendered at the top of real Settings");
+        window.UpdateLayout();
+        var detailedBox = (System.Windows.Controls.CheckBox)window.FindName("DetailedBox");
+        Assert(startupBox.TransformToAncestor(window).Transform(new System.Windows.Point()).Y < detailedBox.TransformToAncestor(window).Transform(new System.Windows.Point()).Y, "startup precedes every other general settings switch");
+        if (args.Contains("--capture-settings"))
+        {
+            var bitmap = new System.Windows.Media.Imaging.RenderTargetBitmap((int)window.Width, (int)window.Height, 96, 96, System.Windows.Media.PixelFormats.Pbgra32);
+            bitmap.Render((System.Windows.Media.Visual)window.Content);
+            var encoder = new System.Windows.Media.Imaging.PngBitmapEncoder();
+            encoder.Frames.Add(System.Windows.Media.Imaging.BitmapFrame.Create(bitmap));
+            using var output = File.Create(Path.Combine(Path.GetDirectoryName(FindRepositoryFile("VERSION"))!, "artifacts", "startup-settings.png"));
+            encoder.Save(output);
+        }
+        startupBox.IsChecked = true;
+        typeof(AqTracker.MainWindow).GetMethod("ApplySettings", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!.Invoke(window, [window, new System.Windows.RoutedEventArgs()]);
+        Assert(new WindowsStartupRegistration(RuntimePaths.ExecutablePath, startupTestKey).IsEnabled && new SettingsStore(Path.Combine(claudeUiRoot, "settings.json")).Load().StartMinimizedWithWindows, "Settings Apply persists the switch and enables the actual isolated Run registration");
     }
     catch (Exception error) { claudeUiFailure = error; }
     finally { window?.Close(); application?.Shutdown(); }
@@ -1810,6 +1879,7 @@ claudeUiThread.SetApartmentState(ApartmentState.STA);
 claudeUiThread.Start();
 claudeUiThread.Join();
 if (Directory.Exists(claudeUiRoot)) Directory.Delete(claudeUiRoot, true);
+Microsoft.Win32.Registry.CurrentUser.DeleteSubKeyTree(startupTestKey, throwOnMissingSubKey: false);
 if (claudeUiFailure is not null) throw new InvalidOperationException("Claude WPF smoke failed", claudeUiFailure);
 
 Console.WriteLine("All AqTracker core tests passed (including Claude engagement, sessions, OAuth, DPAPI, usage and WPF bindings).");

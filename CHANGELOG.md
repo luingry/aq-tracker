@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.25.0] - 2026-10-02
+
+### Added
+
+- "Iniciar minimizado com o Windows" switch at the top of Settings, with per-user startup registration and a tray-only sign-in launch. The tray Show action restores the widget; new profile engagement resumes its automatic visibility.
+
+### Fixed
+
+- Settings saves now flush and replace files atomically, keep a complete recovery copy and recover invalid or missing primary JSON without resetting preferences. Unrecoverable or inaccessible files are preserved instead of silently loading defaults.
+- All executable locations share one per-user instance lock, preventing simultaneous installed/development copies from overwriting preferences or racing Claude refresh-token rotation.
+- WPF tests no longer execute the application's production startup. Their window, preferences and Claude credentials remain isolated from real user data.
+- Silent upgrades preserve the live Windows startup choice, including when disabled in Settings after a previous installer enabled it.
+
 ## [0.24.2] - 2026-10-02
 
 ### Fixed

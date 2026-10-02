@@ -18,6 +18,9 @@ namespace AqTracker;
 public partial class MainWindow : Window
 {
     private readonly SettingsStore _store = new();
+    private readonly WindowsStartupRegistration _windowsStartup;
+    private bool _startupHidden;
+    private bool? _startupEngaged;
     private readonly MainViewModel _viewModel;
     private readonly CancellationTokenSource _shutdown = new();
     private readonly LocalUsageAnalyticsService _analytics = new();
@@ -82,9 +85,12 @@ public partial class MainWindow : Window
     [Flags]
     private enum ResizeEdge { None = 0, Left = 1, Top = 2, Right = 4, Bottom = 8 }
 
-    public MainWindow(bool demo = false, SettingsStore? settingsStore = null)
+    public MainWindow(bool demo = false, SettingsStore? settingsStore = null, bool startMinimized = false, WindowsStartupRegistration? windowsStartup = null)
     {
         if (settingsStore is not null) _store = settingsStore;
+        _windowsStartup = windowsStartup ?? new WindowsStartupRegistration(RuntimePaths.ExecutablePath);
+        _startupHidden = startMinimized;
+        if (startMinimized) { ShowActivated = false; Opacity = 0; }
         _settings = _store.Load();
         _unreadAgentWorks = (_settings.UnreadAgentWorks ?? []).OrderByDescending(work => work.CompletedAt).ToList();
         _observedCompletionIds.UnionWith(_unreadAgentWorks.Select(work => work.CompletionId));
@@ -119,6 +125,7 @@ public partial class MainWindow : Window
         Top = _settings.Top;
         Loaded += async (_, _) =>
         {
+            if (_startupHidden) { Hide(); Opacity = 1; }
             _refreshTimer.Start();
             _agentTimer.Start();
             _visibilityTimer.Start();
@@ -300,10 +307,10 @@ public partial class MainWindow : Window
             if (previouslyVisibleIndicator != _viewModel.HasAgentIndicator)
             {
                 if (!_viewModel.HasAgentIndicator) _viewModel.IsAgentListOpen = false;
-                else if (_settings.IsAgentListExpanded && !_viewModel.Expanded) _viewModel.IsAgentListOpen = true;
+                else if (!_startupHidden && _settings.IsAgentListExpanded && !_viewModel.Expanded) _viewModel.IsAgentListOpen = true;
                 ApplyCompactAgentIndicatorSize();
             }
-            else if (previouslyActive != _viewModel.HasActiveAgents && _settings.IsAgentListExpanded && !_viewModel.Expanded)
+            else if (!_startupHidden && previouslyActive != _viewModel.HasActiveAgents && _settings.IsAgentListExpanded && !_viewModel.Expanded)
                 _viewModel.IsAgentListOpen = true;
             if (AgentListPopup.IsOpen && _viewModel.ActiveAgents.Any(row => row.IsNew))
                 _ = Dispatcher.InvokeAsync(async () => { await Task.Delay(210); _viewModel.MarkNewAgentRowsStable(); });
@@ -490,13 +497,21 @@ public partial class MainWindow : Window
 
         var previousMenu = _trayMenu;
         var menu = new Forms.ContextMenuStrip();
-        menu.Items.Add(LocalizationManager.Text("Show"), null, (_, _) => { Show(); Activate(); });
+        menu.Items.Add(LocalizationManager.Text("Show"), null, (_, _) => ShowFromTray());
         menu.Items.Add(LocalizationManager.Text("ToggleDetailedMode"), null, (_, _) => Dispatcher.Invoke(() => ToggleDetailed(this, new RoutedEventArgs())));
         menu.Items.Add(LocalizationManager.Text("Refresh"), null, async (_, _) => await RefreshAsync());
         menu.Items.Add(LocalizationManager.Text("Exit"), null, (_, _) => Close());
         _tray.ContextMenuStrip = menu;
         _trayMenu = menu;
         previousMenu?.Dispose();
+    }
+
+    private void ShowFromTray()
+    {
+        _startupHidden = false;
+        Opacity = 1;
+        Show();
+        Activate();
     }
 
     private static System.Drawing.Icon CreateTrayIcon(string? accentColor)
@@ -616,6 +631,19 @@ public partial class MainWindow : Window
         var shouldShow = WidgetVisibilityPolicy.ShouldShow(
             codex, claude,
             IsActive || AgentListPopup.IsOpen);
+        // Do not reopen immediately for work already present at sign-in. Resume normal
+        // visibility on the next idle -> engaged transition, or explicitly from the tray.
+        if (_startupHidden)
+        {
+            // The first agent snapshot belongs to startup, even when it arrives after
+            // the first visibility timer tick. Do not misclassify it as newly started work.
+            if (!_agentStateInitialized) return;
+            var engaged = codex.IsEngaged || claude.IsEngaged;
+            if (_startupEngaged is null) { _startupEngaged = engaged; return; }
+            if (!engaged) _startupEngaged = false;
+            if (_startupEngaged == true || !engaged) return;
+            _startupHidden = false;
+        }
         if (shouldShow)
         {
             if (!IsVisible) Show();
@@ -743,6 +771,7 @@ public partial class MainWindow : Window
         _pendingAccentColor = _settings.AccentColor;
         _pendingClaudeAccentColor = _settings.ClaudeAccentColor;
         DetailedBox.IsChecked = _viewModel.Expanded;
+        StartupBox.IsChecked = _windowsStartup.IsEnabled;
         TopmostBox.IsChecked = Topmost;
         ThemeToggle.IsChecked = _settings.Theme == "Escuro";
         LanguageBox.SelectedIndex = LocalizationManager.NormalizeLanguage(_settings.LanguageCode) == "en-US" ? 1 : 0;
@@ -809,8 +838,10 @@ public partial class MainWindow : Window
             ? string.IsNullOrWhiteSpace(PathBox.Text) ? null : PathBox.Text
             : _settings.CodexPath;
         CancelClaudeLogin();
+        var startupEnabled = StartupBox.IsChecked == true;
+        _windowsStartup.SetEnabled(startupEnabled);
         _settings = _settings with { CodexPath = manualCodexPath, UsdBrl = rate > 0 ? rate : 5.5m, Theme = theme, CurrencyCode = currency, AccentColor = AccentPalette.Normalize(_pendingAccentColor), LanguageCode = language, CompactQuotaDisplay = compactQuotaDisplay,
-            ClaudeProfileEnabled = ClaudeEnabledBox.IsChecked != false, ClaudeAccentColor = AccentPalette.Normalize(_pendingClaudeAccentColor) };
+            ClaudeProfileEnabled = ClaudeEnabledBox.IsChecked != false, ClaudeAccentColor = AccentPalette.Normalize(_pendingClaudeAccentColor), StartMinimizedWithWindows = startupEnabled };
         LocalizationManager.Apply(language);
         ApplyProfileTheme(theme, _settings.AccentColor, _settings.ClaudeAccentColor);
         CreateTray();

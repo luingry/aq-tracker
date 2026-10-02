@@ -423,6 +423,11 @@
                       <TextBlock Text="{DynamicResource Loc.SettingsGeneral}" Style="{StaticResource SettingsSectionTitle}" Margin="0,0,0,8" />
                       <Grid Margin="0,4">
                         <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                        <TextBlock Text="{DynamicResource Loc.StartMinimizedWithWindows}" Style="{StaticResource SettingsRowLabel}" TextTrimming="None" TextWrapping="Wrap" Margin="0,0,10,0" />
+                        <CheckBox x:Name="StartupBox" Grid.Column="1" Style="{StaticResource ThemeSwitch}" AutomationProperties.Name="{DynamicResource Loc.StartMinimizedWithWindows}" />
+                      </Grid>
+                      <Grid Margin="0,4">
+                        <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
                         <TextBlock Text="{DynamicResource Loc.DetailedMode}" Style="{StaticResource SettingsRowLabel}" />
                         <CheckBox x:Name="DetailedBox" Grid.Column="1" Style="{StaticResource ThemeSwitch}" AutomationProperties.Name="{DynamicResource Loc.DetailedMode}" />
                       </Grid>

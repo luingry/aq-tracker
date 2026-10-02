@@ -176,6 +176,7 @@ public sealed class ClaudeUsageClient : IDisposable
     private void Backoff() { IsStale = true; _failures = Math.Min(_failures + 1, 5); _nextAttempt = _clock().AddSeconds(Math.Min(600, 60 * Math.Pow(2, _failures - 1))); }
     private void RequireReconnect()
     {
+        SanitizedLogger.Write("Claude reconnect required: authentication rejected.");
         _tokens = null; IsStale = true; State = ClaudeConnectionState.Reconnect;
         _store.Delete();
     }

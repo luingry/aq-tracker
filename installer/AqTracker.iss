@@ -57,7 +57,8 @@ Name: "{autodesktop}\{#AppName}"; Filename: "{app}\{#AppExeName}"; Tasks: deskto
 
 [Registry]
 Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: none; ValueName: "CodexTracker"; Flags: deletevalue
-Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: string; ValueName: "AqTracker"; ValueData: """{app}\{#AppExeName}"""; Tasks: autostart; Flags: uninsdeletevalue
+Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: string; ValueName: "AqTracker"; ValueData: """{app}\{#AppExeName}"" --startup"; Tasks: autostart; Check: UseSelectedStartup; Flags: uninsdeletevalue
+Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: string; ValueName: "AqTracker"; ValueData: """{app}\{#AppExeName}"" --startup"; Check: UsePreservedStartup; Flags: uninsdeletevalue
 
 [Run]
 Filename: "{app}\{#AppExeName}"; Description: "Launch {#AppName}"; Flags: nowait postinstall skipifsilent
@@ -71,6 +72,18 @@ Filename: "{app}\{#AppExeName}"; Parameters: "--shutdown-existing"; Flags: runhi
 [Code]
 var
   LegacyAppDir: String;
+  ExistingInstallation, ExistingStartup: Boolean;
+
+function UseSelectedStartup(): Boolean;
+begin
+  Result := not (WizardSilent and ExistingInstallation);
+end;
+
+function UsePreservedStartup(): Boolean;
+begin
+  // Silent upgrades preserve the live in-app choice instead of remembered installer tasks.
+  Result := WizardSilent and ExistingInstallation and ExistingStartup;
+end;
 
 function ShouldRelaunchAfterUpdate(): Boolean;
 begin
@@ -85,6 +98,9 @@ var
   UninstallKey: String;
 begin
   UninstallKey := 'Software\Microsoft\Windows\CurrentVersion\Uninstall\{D8C84F82-ED90-4F1F-AB4E-1455E5B66C2C}_is1';
+  ExistingInstallation := RegKeyExists(HKCU, UninstallKey) or RegKeyExists(HKLM, UninstallKey);
+  ExistingStartup := RegValueExists(HKCU, 'Software\Microsoft\Windows\CurrentVersion\Run', 'AqTracker') or
+    RegValueExists(HKCU, 'Software\Microsoft\Windows\CurrentVersion\Run', 'CodexTracker');
   if not RegQueryStringValue(HKCU, UninstallKey, 'InstallLocation', Location) then
     RegQueryStringValue(HKLM, UninstallKey, 'InstallLocation', Location);
   if (Location <> '') and FileExists(AddBackslash(Location) + '{#LegacyExeName}') then

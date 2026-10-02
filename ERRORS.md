@@ -386,3 +386,24 @@
 - **Causa:** dois caminhos disputavam a altura. `Settings()` chamava `ScheduleSettingsHeightForContent()`, que media o conteúdo inteiro (sem limite do `ScrollViewer`) e expandia a janela; depois, qualquer snapshot de cota ou mudança de perfil chamava `ApplyWindowModeSize()`, que redefinia o modo Settings para `SettingsMinHeight` (440).
 - **Solução:** removido o ajuste ao conteúdo. O modo Settings tem uma única altura fixa (`WidgetSizePolicy.SettingsHeight` = 572, 30% acima de 440) limitada à área de trabalho por `SettingsHeightForWorkArea`, e todo chamador de `ApplyWindowModeSize()` resolve para o mesmo valor; o conteúdo rola.
 - **Prevenção:** um modo de janela deve ter uma única fonte de altura; não agende re-medições assíncronas que outro caminho síncrono possa sobrescrever.
+
+## Teste WPF iniciava o Tracker real e acessava preferencias e tokens do usuario
+
+- **Sintoma:** executar a suite WPF alterava o `settings.json` real e podia rotacionar os tokens Claude fora da instancia instalada; o usuario relatou perda de preferencias e necessidade de repetir o setup. O episodio historico nao possui evidencia suficiente para atribuir sua causa com certeza.
+- **Causa:** `Application` agenda `OnStartup` no dispatcher mesmo sem chamar `Run()`. O teste construia `App`, inicializava recursos e bombeava o dispatcher, disparando uma segunda `MainWindow` com os stores reais, alem da janela de fixture. O mutex baseado no caminho do executavel permitia concorrencia com o Tracker instalado. Separadamente, `SettingsStore` truncava o JSON em cada save e convertia qualquer falha de leitura em preferencias padrao.
+- **Solucao:** `App(launchMainWindow: false)` inicializa recursos WPF sem iniciar o runtime no harness; o teste exige exatamente sua propria janela. O mutex passou a usar a identidade do usuario, independente do executavel. Configuracoes usam escrita atomica com flush, backup da ultima versao salva e recuperacao; arquivos inacessiveis ou sem copia valida nunca viram defaults silenciosamente.
+- **Prevencao:** testes WPF precisam controlar o startup e injetar stores e registro isolados. Foram reproduzidas em vermelho a abertura da janela real e a perda ao interromper o JSON. Verificar hashes dos arquivos reais antes/depois da suite, alem de testar JSON invalido, arquivo ausente, locks de leitura/substituicao, tokens DPAPI e registro Run temporario. Tokens OAuth rotativos nunca devem ser acessados por duas instancias simultaneas.
+
+## Primeiro snapshot de agentes reabria a inicializacao minimizada
+
+- **Sintoma:** o executavel instalado com `--startup` mostrava o widget e a lista em poucos segundos quando ja existiam agentes ativos e a preferencia da lista expandida estava ligada.
+- **Causa:** o timer de visibilidade podia estabelecer um baseline sem agentes antes de terminar o primeiro snapshot; a chegada desse snapshot era interpretada como trabalho novo. A restauracao da lista tambem ignorava o estado de inicializacao oculta.
+- **Solucao:** estabelecer o baseline somente depois da inicializacao do estado de agentes e suprimir a restauracao automatica da lista enquanto o startup estiver oculto.
+- **Prevencao:** validar o executavel instalado com agentes realmente ativos e a lista expandida persistida, alem do smoke demo; exigir ausencia de janelas visiveis apos a primeira leitura e manter Mostrar da bandeja como restauracao explicita.
+
+## Atualizacao silenciosa podia reativar inicializacao desabilitada nas configuracoes
+
+- **Sintoma:** desabilitar o novo switch removia o Run, mas a proxima atualizacao silenciosa podia recria-lo.
+- **Causa:** o instalador reutilizava a task `autostart` lembrada na instalacao anterior, independente da escolha posterior do aplicativo.
+- **Solucao:** capturar o estado real do Run antes da atualizacao e usa-lo em upgrades silenciosos; preservar a task selecionada em instalacoes novas ou interativas. O switch consulta o Run como fonte efetiva do Windows.
+- **Prevencao:** validar reinstalacao silenciosa com Run presente e ausente, conservando os arquivos de preferencias e tokens nos dois casos.

@@ -29,7 +29,11 @@ public sealed class ClaudeTokenStore : IClaudeTokenStore
             }
             finally { Array.Clear(plain, 0, plain.Length); }
         }
-        catch (Exception error) when (error is IOException or UnauthorizedAccessException or CryptographicException or JsonException) { return null; }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException or CryptographicException or JsonException)
+        {
+            SanitizedLogger.Write("Claude token load failed: " + error.GetType().Name);
+            return null;
+        }
     }
     public void Save(ClaudeTokens tokens)
     {
@@ -40,7 +44,7 @@ public sealed class ClaudeTokenStore : IClaudeTokenStore
     public void Delete() { if (File.Exists(_path)) File.Delete(_path); }
 }
 
-internal static class AtomicFile
+public static class AtomicFile
 {
     public static void Write(string path, byte[] bytes)
     {
@@ -48,7 +52,11 @@ internal static class AtomicFile
         var temporary = path + "." + Guid.NewGuid().ToString("N") + ".tmp";
         try
         {
-            File.WriteAllBytes(temporary, bytes);
+            using (var stream = new FileStream(temporary, FileMode.CreateNew, FileAccess.Write, FileShare.None))
+            {
+                stream.Write(bytes, 0, bytes.Length);
+                stream.Flush(flushToDisk: true);
+            }
             if (File.Exists(path)) File.Replace(temporary, path, null, ignoreMetadataErrors: true);
             else File.Move(temporary, path);
         }

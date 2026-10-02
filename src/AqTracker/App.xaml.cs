@@ -1,11 +1,16 @@
 namespace AqTracker;
 public partial class App : System.Windows.Application
 {
+    private readonly bool _launchMainWindow;
+    public App() : this(true) { }
+    // WPF schedules OnStartup even when a UI harness does not call Run().
+    public App(bool launchMainWindow) => _launchMainWindow = launchMainWindow;
     private Mutex? _singleInstanceMutex;
     private EventWaitHandle? _shutdownEvent;
 
     protected override void OnStartup(System.Windows.StartupEventArgs e)
     {
+        if (!_launchMainWindow) { base.OnStartup(e); return; }
         var mutexName = GetSingleInstanceMutexName();
         if (e.Args.Contains("--shutdown-existing", StringComparer.OrdinalIgnoreCase))
         {
@@ -33,7 +38,8 @@ public partial class App : System.Windows.Application
 
         base.OnStartup(e);
         AqTracker.Core.LegacyDataMigration.MigrateRoamingData();
-        var window = new MainWindow(e.Args.Contains("--demo", StringComparer.OrdinalIgnoreCase));
+        var window = new MainWindow(e.Args.Contains("--demo", StringComparer.OrdinalIgnoreCase),
+            startMinimized: e.Args.Contains("--startup", StringComparer.OrdinalIgnoreCase));
         MainWindow = window;
         window.Show();
     }
@@ -53,12 +59,10 @@ public partial class App : System.Windows.Application
 
     private static string GetSingleInstanceMutexName()
     {
-        var executablePath = System.IO.Path.GetFullPath(AqTracker.Core.RuntimePaths.ExecutablePath).ToUpperInvariant();
-        using (var algorithm = System.Security.Cryptography.SHA256.Create())
-        {
-            var hash = algorithm.ComputeHash(System.Text.Encoding.UTF8.GetBytes(executablePath));
-            return @"Local\AqTracker." + BitConverter.ToString(hash, 0, 12).Replace("-", string.Empty);
-        }
+        // Every executable location uses the same per-user data and OAuth refresh token.
+        // A mutex per executable path allowed dev/installed copies to overwrite each other.
+        using var identity = System.Security.Principal.WindowsIdentity.GetCurrent();
+        return @"Local\AqTracker.User." + identity.User!.Value;
     }
 
     private static string GetShutdownEventName() => GetSingleInstanceMutexName() + ".Shutdown";
