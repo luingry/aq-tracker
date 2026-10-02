@@ -319,6 +319,8 @@
 
 ## Popup de agentes travava na tela durante arraste do widget
 
+- **Atualização (0.29.1):** o resize sem mudança de `Left`/`Top` também deixava o popup na posição antiga. `SizeChanged` agora agenda o reposicionamento em `DispatcherPriority.Loaded`, após o arrange do indicador. A regressão WPF usa um agente ativo e compara coordenadas reais do popup após aumentar e diminuir o compacto, sem mover a janela, com as coordenadas de um refresh explícito.
+
 - **Sintoma:** o popup/lista de agentes abertos permanecia parado na tela quando o widget era arrastado, não acompanhando a posição da janela.
 - **Causa:** o `Popup` do WPF usa HWND separado; mover a janela proprietária não acionava o `Reposition` interno no `PlacementTarget` apenas com `InvalidateArrange`/`UpdateLayout`.
 - **Solução:** em `LocationChanged` (e/ou `WM_MOVING`), variar `HorizontalOffset` em `+0.01` DIP e restaurar imediatamente, forçando `OnOffsetChanged`/`Reposition` sem fechar o popup nem deslocá-lo perceptivelmente.
@@ -445,3 +447,10 @@
 - **Causa:** o teste pressupunha a existencia de artifacts, presente localmente mas ausente no checkout novo.
 - **Solucao:** criar explicitamente o diretorio antes de salvar notification-icons.png.
 - **Prevencao:** testes que produzem evidencias devem criar seus proprios diretorios de saida.
+
+## Arrastar o slider movia a janela
+
+- **Sintoma:** arrastar o marcador de opacidade movia a janela junto.
+- **Causa:** o preview reconhecia controles interativos apenas para suprimir duplo clique, mas armava o arraste nativo mesmo assim.
+- **Solucao:** retornar antes de armar movimento ou resize quando a origem pertence a um controle interativo.
+- **Prevencao:** regressao WPF envia PreviewMouseDown pelo Thumb real e verifica que o gesto nao arma o arraste da janela.

@@ -29,6 +29,13 @@ public static class ManualResizeGeometry
 {
     public const double CompactAspectRatio = 62d / 52d;
 
+    public static double RequestedCompactWidth(ResizeBounds start, ResizeVector delta, ResizeHandle handle, double aspectRatio = CompactAspectRatio)
+    {
+        var horizontalDelta = handle.HasFlag(ResizeHandle.Left) ? -delta.X : handle.HasFlag(ResizeHandle.Right) ? delta.X : 0;
+        var verticalDelta = (handle.HasFlag(ResizeHandle.Top) ? -delta.Y : delta.Y) * aspectRatio;
+        return start.Width + (Math.Abs(horizontalDelta) >= Math.Abs(verticalDelta) ? horizontalDelta : verticalDelta);
+    }
+
     public static ResizeBounds ResizeCompact(
         ResizeBounds start,
         ResizeVector delta,
@@ -39,9 +46,7 @@ public static class ManualResizeGeometry
         double aspectRatio = CompactAspectRatio,
         double heightOffset = 0d)
     {
-        var horizontalDelta = handle.HasFlag(ResizeHandle.Left) ? -delta.X : handle.HasFlag(ResizeHandle.Right) ? delta.X : 0;
-        var verticalDelta = (handle.HasFlag(ResizeHandle.Top) ? -delta.Y : delta.Y) * aspectRatio;
-        var requestedWidth = start.Width + (Math.Abs(horizontalDelta) >= Math.Abs(verticalDelta) ? horizontalDelta : verticalDelta);
+        var requestedWidth = RequestedCompactWidth(start, delta, handle, aspectRatio);
         var maximumWidth = Math.Min(maxWidth, CompactMaximumWidth(start, handle, workArea, aspectRatio, heightOffset));
         var width = Net48Compatibility.Clamp(requestedWidth, minWidth, maximumWidth);
         var height = width / aspectRatio + heightOffset;

@@ -285,6 +285,7 @@
     </Style>
 
     <Style x:Key="OpacitySlider" TargetType="Slider">
+      <Setter Property="FocusVisualStyle" Value="{x:Null}" />
       <Setter Property="Height" Value="28" />
       <Setter Property="IsMoveToPointEnabled" Value="True" />
       <Setter Property="Template">
@@ -299,7 +300,7 @@
                   </RepeatButton>
                 </Track.DecreaseRepeatButton>
                 <Track.Thumb>
-                  <Thumb Width="14" Height="14">
+                  <Thumb Width="14" Height="14" Cursor="Hand">
                     <Thumb.Template>
                       <ControlTemplate TargetType="Thumb">
                         <Ellipse x:Name="Dot" Fill="{DynamicResource UiAccent}" Stroke="{DynamicResource CardSurface}" StrokeThickness="2" />
@@ -314,9 +315,7 @@
                   </RepeatButton>
                 </Track.IncreaseRepeatButton>
               </Track>
-              <Border x:Name="FocusRing" CornerRadius="5" BorderBrush="{DynamicResource SoftInk}" BorderThickness="1" Visibility="Collapsed" IsHitTestVisible="False" />
             </Grid>
-            <ControlTemplate.Triggers><Trigger Property="IsKeyboardFocusWithin" Value="True"><Setter TargetName="FocusRing" Property="Visibility" Value="Visible" /></Trigger></ControlTemplate.Triggers>
           </ControlTemplate>
         </Setter.Value>
       </Setter>
@@ -401,6 +400,7 @@
     </Style>
 
     <Style x:Key="ThemeSwitch" TargetType="CheckBox">
+      <Setter Property="Cursor" Value="Hand" />
       <Setter Property="Width" Value="38" /><Setter Property="Height" Value="22" />
       <Setter Property="Template">
         <Setter.Value>

@@ -1984,6 +1984,11 @@ var claudeUiThread = new Thread(() =>
         fadeBox.IsChecked = true;
         window.UpdateLayout();
         Assert(opacityRow.IsVisible, "enabling fade reveals the opacity slider");
+        opacitySlider.ApplyTemplate();
+        var opacityTrack = (System.Windows.Controls.Primitives.Track)opacitySlider.Template.FindName("PART_Track", opacitySlider);
+        opacityTrack.Thumb.RaiseEvent(new System.Windows.Input.MouseButtonEventArgs(System.Windows.Input.Mouse.PrimaryDevice, 0, System.Windows.Input.MouseButton.Left)
+        { RoutedEvent = System.Windows.Input.Mouse.PreviewMouseDownEvent });
+        Assert(!(bool)typeof(AqTracker.MainWindow).GetField("_dragCandidate", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!.GetValue(window)!, "slider thumb input never arms native window dragging");
         opacitySlider.Value = 0;
         Assert(opacitySlider.Value == 10, "opacity slider clamps its minimum to 10 percent");
         opacitySlider.Value = 100;
@@ -2017,7 +2022,7 @@ var claudeUiThread = new Thread(() =>
         var persisted = new SettingsStore(Path.Combine(claudeUiRoot, "settings.json")).Load();
         Assert(persisted.ShowInNotificationArea && persisted.FadeFloatingWidget && persisted.FloatingOpacityPercent == 30 && !window.IsVisible, "notification mode and fade persist and applying hides the widget");
         var flags = System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic;
-        void InvokeWindow(string method) => typeof(AqTracker.MainWindow).GetMethod(method, flags)!.Invoke(window, null);
+        void InvokeWindow(string method, params object[] arguments) => typeof(AqTracker.MainWindow).GetMethod(method, flags)!.Invoke(window, arguments);
         InvokeWindow("ShowFromTray");
         vm.Expanded = false;
         hoverSurface.SetValue(mouseOverKey, false);
@@ -2033,6 +2038,22 @@ var claudeUiThread = new Thread(() =>
         agentPopup.IsOpen = true;
         window.Dispatcher.Invoke(() => { }, System.Windows.Threading.DispatcherPriority.ApplicationIdle);
         window.Topmost = false;
+        // Compare automatic placement with a forced refresh, without moving the widget.
+        vm.ApplyAgents([rootAgent], agentRowsNow, false, animationsEnabled: false);
+        vm.IsAgentListOpen = true;
+        window.Left = 500;
+        window.Top = 300;
+        foreach (var scale in new[] { 62d, 90d, 70d })
+        {
+            var resizedWidth = (double)typeof(AqTracker.MainWindow).GetMethod("CompactWidthForStoredSize", flags)!.Invoke(window, [scale])!;
+            InvokeWindow("SetCompactSize", resizedWidth);
+            window.Dispatcher.Invoke(() => { }, System.Windows.Threading.DispatcherPriority.ApplicationIdle);
+            var automaticPopupPosition = agentPopup.Child.PointToScreen(new System.Windows.Point());
+            InvokeWindow("RepositionAgentListPopup");
+            var refreshedPopupPosition = agentPopup.Child.PointToScreen(new System.Windows.Point());
+            Assert((automaticPopupPosition - refreshedPopupPosition).Length < 1d,
+                "open agent popup follows compact growth and shrinkage without moving the window or explicitly refreshing placement");
+        }
         var popupHandle = ((System.Windows.Interop.HwndSource)System.Windows.PresentationSource.FromVisual(agentPopup.Child)).Handle;
         var nativeStyleMethod = typeof(AqTracker.MainWindow).GetMethod("GetExtendedWindowStyle", System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.NonPublic)!;
         var popupStyle = ((IntPtr)nativeStyleMethod.Invoke(null, [popupHandle])!).ToInt64();
@@ -2138,6 +2159,41 @@ var claudeUiThread = new Thread(() =>
         var previewDirectory = Path.Combine(Path.GetDirectoryName(FindRepositoryFile("VERSION"))!, "artifacts");
         Directory.CreateDirectory(previewDirectory);
         preview.Save(Path.Combine(previewDirectory, "notification-icons.png"));
+
+        // Exercise the real resize-to-detail transition for single and multiple quotas.
+        foreach (var multipleQuotas in new[] { false, true })
+        {
+            vm.SetClaudeEnabled(multipleQuotas);
+            vm.SetCompactQuotaDisplay(multipleQuotas ? "both" : "7d");
+            foreach (var edgeValue in new[] { 1, 2, 4, 8, 3, 6, 9, 12 })
+            {
+                vm.Expanded = false;
+                RefreshModeSize();
+                var cap = (double)typeof(AqTracker.MainWindow).GetProperty("CompactWidthCap", flags)!.GetValue(window)!;
+                var ratio = (double)typeof(AqTracker.MainWindow).GetProperty("CompactResizeAspectRatio", flags)!.GetValue(window)!;
+                InvokeWindow("SetCompactSize", cap - 10d);
+                window.UpdateLayout();
+                var edgeField = typeof(AqTracker.MainWindow).GetField("_resizeEdge", flags)!;
+                edgeField.SetValue(window, Enum.ToObject(edgeField.FieldType, edgeValue));
+                typeof(AqTracker.MainWindow).GetField("_resizeStartScreen", flags)!.SetValue(window, new System.Windows.Point(0, 0));
+                typeof(AqTracker.MainWindow).GetField("_resizeStartBounds", flags)!.SetValue(window, new System.Windows.Rect(400, 400, cap - 10d, window.Height));
+                typeof(AqTracker.MainWindow).GetField("_resizeWorkArea", flags)!.SetValue(window, new ResizeWorkArea(0, 0, 4000, 4000));
+                typeof(AqTracker.MainWindow).GetField("_manualResize", flags)!.SetValue(window, true);
+                typeof(AqTracker.MainWindow).GetField("_resizeGestureActive", flags)!.SetValue(window, true);
+                var horizontal = (edgeValue & 5) != 0;
+                System.Windows.Point ResizePoint(double growth) => horizontal
+                    ? new((edgeValue & 1) != 0 ? -growth : growth, 0)
+                    : new(0, ((edgeValue & 2) != 0 ? -growth : growth) / ratio);
+                InvokeWindow("ApplyManualResize", ResizePoint(9d));
+                Assert(!vm.Expanded, "resize below the compact limit stays compact");
+                InvokeWindow("ApplyManualResize", ResizePoint(11d));
+                Assert(vm.Expanded && window.Width == WidgetSizePolicy.DetailedWidth, "overflow opens real detailed widget for every edge and quota layout");
+                Assert(!(bool)typeof(AqTracker.MainWindow).GetField("_manualResize", flags)!.GetValue(window)! &&
+                    (bool)typeof(AqTracker.MainWindow).GetField("_resizeGestureActive", flags)!.GetValue(window)!, "overflow ends resize and consumes the remaining gesture");
+                InvokeWindow("ToggleDetailed", window, new System.Windows.RoutedEventArgs());
+                Assert(!vm.Expanded && NearlyEqual(window.Width, cap), "returning to compact restores its capped size");
+            }
+        }
     }
     catch (Exception error) { claudeUiFailure = error; }
     finally { window?.Close(); application?.Shutdown(); }

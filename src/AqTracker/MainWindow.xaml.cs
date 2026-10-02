@@ -152,6 +152,13 @@ public partial class MainWindow : Window
         Closing += OnClosing;
         SourceInitialized += OnSourceInitialized;
         LocationChanged += (_, _) => RepositionAgentListPopup();
+        SizeChanged += (_, _) =>
+        {
+            // The indicator moves during arrange; refresh the separate popup HWND
+            // after layout so it uses the new anchor even when Left/Top stay fixed.
+            if (AgentListPopup.IsOpen)
+                Dispatcher.BeginInvoke(new Action(RepositionAgentListPopup), DispatcherPriority.Loaded);
+        };
         _refreshTimer.Tick += async (_, _) => await RefreshAsync();
         _agentTimer.Tick += async (_, _) => await RefreshAgentsAsync();
         _visibilityTimer.Tick += (_, _) => { CheckNotificationFocus(); UpdateWidgetVisibility(); };
@@ -977,6 +984,11 @@ public partial class MainWindow : Window
 
         _dragCandidate = false;
         _resizeGestureActive = false; // A new down always begins a distinct gesture.
+        if (e.OriginalSource is DependencyObject controlSource && IsInteractive(controlSource))
+        {
+            _suppressDoubleClickToggle = true;
+            return;
+        }
         var position = e.GetPosition(this);
         _resizeEdge = GetResizeEdge(position);
         if (_resizeEdge != ResizeEdge.None)
@@ -1134,6 +1146,12 @@ public partial class MainWindow : Window
         Left = compactBounds.Left;
         Top = compactBounds.Top - (_viewModel.HasAgentIndicator && handle.HasFlag(ResizeHandle.Top) ? CompactAgentIndicatorHeight : 0d);
         SetCompactSize(compactBounds.Width);
+        if (ManualResizeGeometry.RequestedCompactWidth(start, delta, handle, CompactResizeAspectRatio) > CompactWidthCap)
+        {
+            // Consume the rest of this gesture so it cannot resize or drag the detailed view.
+            FinishManualResize(false);
+            ToggleDetailed(this, new RoutedEventArgs());
+        }
     }
 
     private ResizeWorkArea GetResizeWorkArea()

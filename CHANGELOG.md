@@ -1,5 +1,30 @@
 # Changelog
 
+## [0.29.1] - 2026-10-02
+
+### Fixed
+
+- The open agent list follows the compact widget while resizing, without requiring a window move to refresh its position.
+
+## [0.29.0] - 2026-10-02
+
+### Added
+
+- Dragging the compact widget beyond its maximum size opens the detailed widget, preserving the compact size and consuming the remaining resize gesture.
+
+## [0.28.2] - 2026-10-02
+
+### Fixed
+
+- Dragging the opacity slider no longer moves the application window; interactive controls retain their own mouse gestures.
+- Removed the surrounding focus border from the opacity slider while preserving keyboard input.
+
+## [0.28.1] - 2026-10-02
+
+### Fixed
+
+- Switches and the opacity slider thumb show a hand cursor on hover.
+
 ## [0.28.0] - 2026-10-02
 
 ### Added
