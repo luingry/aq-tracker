@@ -17,7 +17,11 @@ internal static class ThemeManager
         Set("Porcelain", dark ? AccentPalette.DarkSurfaceHex : "#F7F7F4");
         Set("Ink", dark ? "#F1F4F2" : "#202523");
         Set("SoftInk", dark ? "#AEB9B4" : "#59635F");
+        Set("UiSoft", dark ? "#454545" : "#DEDEDE");
+        Set("SwitchActiveBackground", dark ? "#426B54" : "#B8DCC5");
         Set("Sage", accent.SoftHex);
+        Set("UiAccent", dark ? "#D0D0D0" : "#595959");
+        Set("OnUiAccent", dark ? "#1A1A1A" : "#FFFFFF");
         Set("Apricot", dark ? "#4C3B31" : "#F0DED0");
         Set("Lavender", dark ? "#37343D" : "#EAE8EF");
         Set("Accent", accent.AccentHex);
@@ -30,7 +34,7 @@ internal static class ThemeManager
         Set("GlassLavender", dark ? "#FF363636" : "#FFEAE8EF");
         Set("SettingsSurface", dark ? "#FF2D2D2D" : "#FFF2F2EE");
         Set("InputSurface", dark ? "#FF3A3A3A" : "#FFE7EBE8");
-        Set("HoverSurface", accent.HoverHex);
+        Set("HoverSurface", dark ? "#484848" : "#E5E5E5");
         Set("CardSurface", dark ? "#FF353535" : "#FFFBFBF9");
         Set("CardBorder", dark ? "#FF424242" : "#FFE0E4E1");
         Set("OnAccent", ReadableTextOn(accent.AccentHex));

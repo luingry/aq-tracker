@@ -414,3 +414,27 @@
 - **Causa:** o instalador reutilizava a task `autostart` lembrada na instalacao anterior, independente da escolha posterior do aplicativo.
 - **Solucao:** capturar o estado real do Run antes da atualizacao e usa-lo em upgrades silenciosos; preservar a task selecionada em instalacoes novas ou interativas. O switch consulta o Run como fonte efetiva do Windows.
 - **Prevencao:** validar reinstalacao silenciosa com Run presente e ausente, conservando os arquivos de preferencias e tokens nos dois casos.
+
+
+## Quotas da bandeja desapareciam sem foco ou trabalho ativo
+
+- **Sintoma:** apenas o perfil ativo ou usado por ultimo permanecia na area de notificacao, mesmo com quotas disponiveis nos dois perfis.
+- **Causa:** os icones consumiam `CompactQuotas`, cuja selecao depende do foco e da atividade do widget.
+- **Solucao:** `NotificationQuotas` seleciona as quotas disponiveis dos perfis habilitados e periodos configurados sem consultar atividade; icones usam numeros maiores sem `%`.
+- **Prevencao:** regressao WPF cobre ambos os perfis ociosos, foco exclusivo, selecao 5h/7d, perfil desabilitado e quota indisponivel; comparar icones ampliados e em 16 px.
+
+
+## Widget aberto pela bandeja continuava visivel ao perder foco
+
+- **Sintoma:** no modo de notificacao, clicar no icone abria o widget ate um fechamento explicito, mesmo apos trocar de aplicativo.
+- **Causa:** o modo ignorava a politica automatica de visibilidade e nao encerrava a abertura manual no evento de desativacao.
+- **Solucao:** acompanhar a abertura pela bandeja e verificar o processo da janela em primeiro plano apos desativacao e no timer existente; foco externo usa o mesmo fechamento do X, preservando icones e fechando a lista. Popups e dialogos do Tracker conservam a abertura.
+- **Prevencao:** testes cobrem foco interno/externo, reabertura e opcao desabilitada; nao confundir HWND separado de um popup com outro aplicativo.
+
+
+## Lista de agentes permanecia sempre no topo com a opcao desativada
+
+- **Sintoma:** a lista podia cobrir outros aplicativos mesmo com `IsTopmost=false`. A janela principal instalada foi inspecionada e estava corretamente sem `WS_EX_TOPMOST`.
+- **Causa:** `Popup` cria um HWND independente que o WPF marca como topmost; alterar `Window.Topmost` nao altera esse popup.
+- **Solucao:** sincronizar a faixa de Z-order do popup com `Topmost` usando `SetWindowPos` sem ativar ou mover, ao trocar a opcao, abrir e reposicionar a lista.
+- **Prevencao:** regressao WPF consulta `WS_EX_TOPMOST` nos HWNDs reais da janela e do popup, em ambos os valores, apos dez reposicionamentos e apos reabertura. Nao validar apenas a preferencia ou a propriedade gerenciada.

@@ -4,7 +4,7 @@ using AqTracker.Core;
 
 namespace AqTracker;
 
-public sealed record AppSettings(double Left = 80, double Top = 80, double Width = 62, double Height = 52, bool IsExpanded = false, bool IsTopmost = true, string? CodexPath = null, decimal UsdBrl = 5.50m, string Theme = "Escuro", string CurrencyCode = "BRL", WidgetModeSizes? ModeSizes = null, bool IsAgentListExpanded = false, string AccentColor = AccentPalette.DefaultBaseHex, string LanguageCode = LocalizationManager.DefaultLanguageCode, IReadOnlyList<CompletedAgentWork>? UnreadAgentWorks = null, DateTimeOffset? LastUpdateCheckUtc = null, string? DeferredUpdateVersion = null, DateTimeOffset? UpdateDeferredAtUtc = null, string CompactQuotaDisplay = "both", bool ClaudeProfileEnabled = true, string ClaudeAccentColor = "#D97757", bool StartMinimizedWithWindows = false);
+public sealed record AppSettings(double Left = 80, double Top = 80, double Width = 62, double Height = 52, bool IsExpanded = false, bool IsTopmost = true, string? CodexPath = null, decimal UsdBrl = 5.50m, string Theme = "Escuro", string CurrencyCode = "BRL", WidgetModeSizes? ModeSizes = null, bool IsAgentListExpanded = false, string AccentColor = AccentPalette.DefaultBaseHex, string LanguageCode = LocalizationManager.DefaultLanguageCode, IReadOnlyList<CompletedAgentWork>? UnreadAgentWorks = null, DateTimeOffset? LastUpdateCheckUtc = null, string? DeferredUpdateVersion = null, DateTimeOffset? UpdateDeferredAtUtc = null, string CompactQuotaDisplay = "both", bool ClaudeProfileEnabled = true, string ClaudeAccentColor = "#D97757", bool StartMinimizedWithWindows = false, bool ShowInNotificationArea = false, bool FadeFloatingWidget = false);
 public sealed class SettingsStore
 {
     private readonly string _path;

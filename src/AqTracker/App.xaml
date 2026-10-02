@@ -7,7 +7,11 @@
     <SolidColorBrush x:Key="Porcelain" Color="#F7F7F4" />
     <SolidColorBrush x:Key="Ink" Color="#202523" />
     <SolidColorBrush x:Key="SoftInk" Color="#59635F" />
+    <SolidColorBrush x:Key="UiSoft" Color="#DEDEDE" />
+    <SolidColorBrush x:Key="SwitchActiveBackground" Color="#B8DCC5" />
     <SolidColorBrush x:Key="Sage" Color="#D5E9E2" />
+    <SolidColorBrush x:Key="UiAccent" Color="#595959" />
+    <SolidColorBrush x:Key="OnUiAccent" Color="#FFFFFF" />
     <SolidColorBrush x:Key="Apricot" Color="#F7D6B9" />
     <SolidColorBrush x:Key="Lavender" Color="#DFD7F1" />
     <SolidColorBrush x:Key="Accent" Color="#0D8F6F" />
@@ -20,7 +24,7 @@
     <SolidColorBrush x:Key="GlassLavender" Color="#FFEAE8EF" />
     <SolidColorBrush x:Key="SettingsSurface" Color="#FFF2F2EE" />
     <SolidColorBrush x:Key="InputSurface" Color="#FFE7EBE8" />
-    <SolidColorBrush x:Key="HoverSurface" Color="#FFDCE7E2" />
+    <SolidColorBrush x:Key="HoverSurface" Color="#FFE5E5E5" />
     <SolidColorBrush x:Key="CardSurface" Color="#FFFBFBF9" />
     <SolidColorBrush x:Key="CardBorder" Color="#FFE0E4E1" />
     <SolidColorBrush x:Key="OnAccent" Color="#FFFFFFFF" />
@@ -152,7 +156,7 @@
                     </Border>
                     <ControlTemplate.Triggers>
                       <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Surface" Property="Background" Value="{DynamicResource HoverSurface}" /></Trigger>
-                      <Trigger Property="IsChecked" Value="True"><Setter TargetName="Surface" Property="Background" Value="{DynamicResource Sage}" /></Trigger>
+                      <Trigger Property="IsChecked" Value="True"><Setter TargetName="Surface" Property="Background" Value="{DynamicResource UiSoft}" /></Trigger>
                     </ControlTemplate.Triggers>
                   </ControlTemplate>
                 </ToggleButton.Template>
@@ -181,7 +185,7 @@
             </Border>
             <ControlTemplate.Triggers>
               <Trigger Property="IsHighlighted" Value="True"><Setter TargetName="Surface" Property="Background" Value="{DynamicResource HoverSurface}" /></Trigger>
-              <Trigger Property="IsSelected" Value="True"><Setter TargetName="Surface" Property="Background" Value="{DynamicResource Sage}" /></Trigger>
+              <Trigger Property="IsSelected" Value="True"><Setter TargetName="Surface" Property="Background" Value="{DynamicResource UiSoft}" /></Trigger>
               <Trigger Property="IsEnabled" Value="False"><Setter Property="Opacity" Value=".45" /></Trigger>
             </ControlTemplate.Triggers>
           </ControlTemplate>
@@ -203,7 +207,7 @@
               <ContentPresenter Margin="13,0,0,0" VerticalAlignment="Center" TextElement.Foreground="{TemplateBinding Foreground}" />
             </BulletDecorator>
             <ControlTemplate.Triggers>
-              <Trigger Property="IsChecked" Value="True"><Setter TargetName="Mark" Property="Background" Value="{DynamicResource Sage}" /><Setter TargetName="Tick" Property="Visibility" Value="Visible" /></Trigger>
+              <Trigger Property="IsChecked" Value="True"><Setter TargetName="Mark" Property="Background" Value="{DynamicResource UiSoft}" /><Setter TargetName="Tick" Property="Visibility" Value="Visible" /></Trigger>
               <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Mark" Property="Background" Value="{DynamicResource HoverSurface}" /></Trigger>
             </ControlTemplate.Triggers>
           </ControlTemplate>
@@ -328,8 +332,8 @@
     </Style>
 
     <Style x:Key="PrimaryButton" TargetType="Button" BasedOn="{StaticResource ActionButtonBase}">
-      <Setter Property="Background" Value="{DynamicResource Accent}" />
-      <Setter Property="Foreground" Value="{DynamicResource OnAccent}" />
+      <Setter Property="Background" Value="{DynamicResource UiAccent}" />
+      <Setter Property="Foreground" Value="{DynamicResource OnUiAccent}" />
     </Style>
 
     <Style x:Key="SecondaryButton" TargetType="Button" BasedOn="{StaticResource ActionButtonBase}">
@@ -339,7 +343,7 @@
 
     <Style x:Key="GhostButton" TargetType="Button" BasedOn="{StaticResource ActionButtonBase}">
       <Setter Property="Background" Value="Transparent" />
-      <Setter Property="Foreground" Value="{DynamicResource Accent}" />
+      <Setter Property="Foreground" Value="{DynamicResource UiAccent}" />
       <Setter Property="Padding" Value="8,6" />
     </Style>
 
@@ -367,8 +371,8 @@
               <Ellipse x:Name="Thumb" Width="16" Height="16" Fill="{DynamicResource SoftInk}" HorizontalAlignment="Left" />
             </Border>
             <ControlTemplate.Triggers>
-              <Trigger Property="IsChecked" Value="True"><Setter TargetName="Track" Property="Background" Value="{DynamicResource Sage}" /><Setter TargetName="Thumb" Property="HorizontalAlignment" Value="Right" /><Setter TargetName="Thumb" Property="Fill" Value="{DynamicResource Accent}" /></Trigger>
               <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Track" Property="Background" Value="{DynamicResource HoverSurface}" /></Trigger>
+              <Trigger Property="IsChecked" Value="True"><Setter TargetName="Track" Property="Background" Value="{DynamicResource SwitchActiveBackground}" /><Setter TargetName="Thumb" Property="HorizontalAlignment" Value="Right" /><Setter TargetName="Thumb" Property="Fill" Value="{DynamicResource UiAccent}" /></Trigger>
             </ControlTemplate.Triggers>
           </ControlTemplate>
         </Setter.Value>

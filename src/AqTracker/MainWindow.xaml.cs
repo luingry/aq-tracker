@@ -92,6 +92,8 @@ public partial class MainWindow : Window
         _startupHidden = startMinimized;
         if (startMinimized) { ShowActivated = false; Opacity = 0; }
         _settings = _store.Load();
+        _startupHidden |= _settings.ShowInNotificationArea;
+        if (_startupHidden) { ShowActivated = false; Opacity = 0; }
         _unreadAgentWorks = (_settings.UnreadAgentWorks ?? []).OrderByDescending(work => work.CompletedAt).ToList();
         _observedCompletionIds.UnionWith(_unreadAgentWorks.Select(work => work.CompletionId));
         LocalizationManager.Apply(_settings.LanguageCode);
@@ -102,16 +104,27 @@ public partial class MainWindow : Window
         AddHandler(Mouse.PreviewMouseMoveEvent, new System.Windows.Input.MouseEventHandler(OnWindowPreviewMouseMove), true);
         AddHandler(Mouse.PreviewMouseUpEvent, new MouseButtonEventHandler(OnWindowPreviewMouseUp), true);
         LostMouseCapture += (_, _) => { if (_manualResize) FinishManualResize(false); };
-        Deactivated += (_, _) => { if (_manualResize) FinishManualResize(false); };
+        Deactivated += (_, _) =>
+        {
+            if (_manualResize) FinishManualResize(false);
+            Dispatcher.BeginInvoke(new Action(CheckNotificationFocus), DispatcherPriority.Background);
+        };
+        WindowSurface.MouseEnter += (_, _) => UpdateFloatingOpacity();
+        WindowSurface.MouseLeave += (_, _) => UpdateFloatingOpacity();
+        AgentListFadeSurface.MouseEnter += (_, _) => UpdateFloatingOpacity();
+        AgentListFadeSurface.MouseLeave += (_, _) => UpdateFloatingOpacity();
+        AgentListPopup.Closed += (_, _) => UpdateFloatingOpacity();
         DataContext = _viewModel;
         _viewModel.PropertyChanged += (_, eventArgs) =>
         {
+            if (eventArgs.PropertyName == nameof(MainViewModel.NotificationQuotas)) UpdateQuotaTray();
             if (eventArgs.PropertyName is nameof(MainViewModel.ShowCompactFiveHour) or nameof(MainViewModel.ShowCompactWeekly) or nameof(MainViewModel.CompactQuotaCount))
                 ApplyWindowModeSize();
         };
         _demo = demo;
         _pendingAccentColor = _settings.AccentColor;
         Topmost = _settings.IsTopmost;
+        ShowInTaskbar = !Topmost;
         ApplyProfileTheme(_settings.Theme, _settings.AccentColor, _settings.ClaudeAccentColor);
         _viewModel.Topmost = Topmost;
         _viewModel.SetCurrency(_settings.CurrencyCode);
@@ -124,7 +137,8 @@ public partial class MainWindow : Window
         Top = _settings.Top;
         Loaded += async (_, _) =>
         {
-            if (_startupHidden) { Hide(); Opacity = 1; }
+            if (_startupHidden) Hide();
+            UpdateFloatingOpacity();
             _refreshTimer.Start();
             _agentTimer.Start();
             _visibilityTimer.Start();
@@ -140,7 +154,7 @@ public partial class MainWindow : Window
         LocationChanged += (_, _) => RepositionAgentListPopup();
         _refreshTimer.Tick += async (_, _) => await RefreshAsync();
         _agentTimer.Tick += async (_, _) => await RefreshAgentsAsync();
-        _visibilityTimer.Tick += (_, _) => UpdateWidgetVisibility();
+        _visibilityTimer.Tick += (_, _) => { CheckNotificationFocus(); UpdateWidgetVisibility(); };
         CreateTray();
     }
 
@@ -488,7 +502,11 @@ public partial class MainWindow : Window
 
     private void CreateTray()
     {
-        _tray ??= new Forms.NotifyIcon { Visible = true, Text = "Agent Quota Tracker" };
+        if (_tray is null)
+        {
+            _tray = new Forms.NotifyIcon { Text = "Agent Quota Tracker" };
+            _tray.MouseClick += (_, e) => { if (e.Button == Forms.MouseButtons.Left) ShowFromTray(); };
+        }
         var previousIcon = _trayIcon;
         _trayIcon = CreateTrayIcon(_settings.AccentColor);
         _tray.Icon = _trayIcon;
@@ -502,13 +520,16 @@ public partial class MainWindow : Window
         menu.Items.Add(LocalizationManager.Text("Exit"), null, (_, _) => Close());
         _tray.ContextMenuStrip = menu;
         _trayMenu = menu;
+        foreach (var entry in _quotaTray) entry.Notify.ContextMenuStrip = menu;
         previousMenu?.Dispose();
+        UpdateQuotaTray();
     }
 
     private void ShowFromTray()
     {
+        _trayRevealActive = _settings.ShowInNotificationArea;
         _startupHidden = false;
-        Opacity = 1;
+        UpdateFloatingOpacity();
         Show();
         Activate();
     }
@@ -627,6 +648,7 @@ public partial class MainWindow : Window
         _viewModel.SetProfileActivity(codex, claude);
         if (claude.IsEngaged && !_wasClaudeEngaged) _ = RefreshClaudeAsync(onlyIfStale: true);
         _wasClaudeEngaged = claude.IsEngaged;
+        if (_settings.ShowInNotificationArea) return;
         var shouldShow = WidgetVisibilityPolicy.ShouldShow(
             codex, claude,
             IsActive || AgentListPopup.IsOpen);
@@ -703,6 +725,7 @@ public partial class MainWindow : Window
 
     private void AgentListPopupOpened(object sender, EventArgs e)
     {
+        UpdateFloatingOpacity();
         RepositionAgentListPopup();
         if (!SystemParameters.ClientAreaAnimation) return;
         AgentListWrapper.Opacity = 0;
@@ -727,6 +750,7 @@ public partial class MainWindow : Window
         var horizontalOffset = AgentListPopup.HorizontalOffset;
         AgentListPopup.HorizontalOffset = horizontalOffset + 0.01d;
         AgentListPopup.HorizontalOffset = horizontalOffset;
+        SynchronizeAgentListTopmost();
     }
 
     private void ToggleDetailed(object sender, RoutedEventArgs e)
@@ -771,6 +795,8 @@ public partial class MainWindow : Window
         _pendingClaudeAccentColor = _settings.ClaudeAccentColor;
         DetailedBox.IsChecked = _viewModel.Expanded;
         StartupBox.IsChecked = _windowsStartup.IsEnabled;
+        NotificationAreaBox.IsChecked = _settings.ShowInNotificationArea;
+        FadeWidgetBox.IsChecked = _settings.FadeFloatingWidget;
         TopmostBox.IsChecked = Topmost;
         ThemeToggle.IsChecked = _settings.Theme == "Escuro";
         LanguageBox.SelectedIndex = LocalizationManager.NormalizeLanguage(_settings.LanguageCode) == "en-US" ? 1 : 0;
@@ -837,10 +863,11 @@ public partial class MainWindow : Window
             ? string.IsNullOrWhiteSpace(PathBox.Text) ? null : PathBox.Text
             : _settings.CodexPath;
         CancelClaudeLogin();
+        var enableTray = NotificationAreaBox.IsChecked == true && !_settings.ShowInNotificationArea;
         var startupEnabled = StartupBox.IsChecked == true;
         _windowsStartup.SetEnabled(startupEnabled);
         _settings = _settings with { CodexPath = manualCodexPath, UsdBrl = rate > 0 ? rate : 5.5m, Theme = theme, CurrencyCode = currency, AccentColor = AccentPalette.Normalize(_pendingAccentColor), LanguageCode = language, CompactQuotaDisplay = compactQuotaDisplay,
-            ClaudeProfileEnabled = ClaudeEnabledBox.IsChecked != false, ClaudeAccentColor = AccentPalette.Normalize(_pendingClaudeAccentColor), StartMinimizedWithWindows = startupEnabled };
+            ClaudeProfileEnabled = ClaudeEnabledBox.IsChecked != false, ClaudeAccentColor = AccentPalette.Normalize(_pendingClaudeAccentColor), StartMinimizedWithWindows = startupEnabled, ShowInNotificationArea = NotificationAreaBox.IsChecked == true, FadeFloatingWidget = FadeWidgetBox.IsChecked == true };
         LocalizationManager.Apply(language);
         ApplyProfileTheme(theme, _settings.AccentColor, _settings.ClaudeAccentColor);
         CreateTray();
@@ -862,6 +889,7 @@ public partial class MainWindow : Window
             if (_client?.Snapshot is { } snapshot) ApplyCachedAnalyticsIfDetailed(snapshot);
             _ = RefreshAnalyticsAsync();
         }
+        if (enableTray) CloseWindow(this, new RoutedEventArgs());
         _ = LoadAsync();
     }
     private void PreviewTheme(object sender, RoutedEventArgs e)
@@ -875,7 +903,13 @@ public partial class MainWindow : Window
         ApplyWindowSurface();
         Backdrop.Apply(this, string.Equals(theme, "Escuro", StringComparison.OrdinalIgnoreCase), CurrentVisualMode);
     }
-    private void CloseWindow(object sender, RoutedEventArgs e) => Hide();
+    private void CloseWindow(object sender, RoutedEventArgs e)
+    {
+        _trayRevealActive = false;
+        if (_settings.ShowInNotificationArea) _startupHidden = true;
+        _viewModel.IsAgentListOpen = false;
+        Hide();
+    }
 
     private void OnSourceInitialized(object? sender, EventArgs e)
     {
@@ -921,7 +955,7 @@ public partial class MainWindow : Window
         if (handle == IntPtr.Zero) return;
 
         var extendedStyle = GetExtendedWindowStyle(handle).ToInt64();
-        var trayOnlyStyle = TrayOnlyWindowPolicy.ToTrayOnlyExtendedStyle(extendedStyle);
+        var trayOnlyStyle = TrayOnlyWindowPolicy.ForTopmost(extendedStyle, Topmost);
         if (trayOnlyStyle == extendedStyle) return;
 
         SetExtendedWindowStyle(handle, new IntPtr(trayOnlyStyle));
@@ -1152,6 +1186,7 @@ public partial class MainWindow : Window
     };
     private void ApplyWindowModeSize()
     {
+        UpdateFloatingOpacity();
         var mode = CurrentVisualMode;
         var size = WidgetSizePolicy.SelectModeSize(_settings.ModeSizes!, mode);
         if (mode == WidgetVisualMode.Detailed)
@@ -1259,6 +1294,7 @@ public partial class MainWindow : Window
         _updateInstallCancellation?.Cancel();
         _client?.DisposeAsync().AsTask().GetAwaiter().GetResult();
         _updates.Dispose();
+        DisposeQuotaTray();
         _tray?.Dispose();
         _trayMenu?.Dispose();
         _trayIcon?.Dispose();

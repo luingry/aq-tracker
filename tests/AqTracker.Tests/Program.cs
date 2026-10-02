@@ -1975,9 +1975,133 @@ var claudeUiThread = new Thread(() =>
             using var output = File.Create(Path.Combine(Path.GetDirectoryName(FindRepositoryFile("VERSION"))!, "artifacts", "startup-settings.png"));
             encoder.Save(output);
         }
+        ((System.Windows.Controls.CheckBox)window.FindName("NotificationAreaBox")).IsChecked = true;
+        ((System.Windows.Controls.CheckBox)window.FindName("FadeWidgetBox")).IsChecked = true;
         startupBox.IsChecked = true;
         typeof(AqTracker.MainWindow).GetMethod("ApplySettings", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!.Invoke(window, [window, new System.Windows.RoutedEventArgs()]);
         Assert(new WindowsStartupRegistration(RuntimePaths.ExecutablePath, startupTestKey).IsEnabled && new SettingsStore(Path.Combine(claudeUiRoot, "settings.json")).Load().StartMinimizedWithWindows, "Settings Apply persists the switch and enables the actual isolated Run registration");
+        var persisted = new SettingsStore(Path.Combine(claudeUiRoot, "settings.json")).Load();
+        Assert(persisted.ShowInNotificationArea && persisted.FadeFloatingWidget && !window.IsVisible, "notification mode and fade persist and applying hides the widget");
+        var flags = System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic;
+        void InvokeWindow(string method) => typeof(AqTracker.MainWindow).GetMethod(method, flags)!.Invoke(window, null);
+        InvokeWindow("ShowFromTray");
+        vm.Expanded = false;
+        hoverSurface.SetValue(mouseOverKey, false);
+        RefreshModeSize();
+        Assert(window.IsVisible && window.Opacity == .5, "tray restores compact floating widget at half opacity");
+        hoverSurface.SetValue(mouseOverKey, true);
+        InvokeWindow("UpdateFloatingOpacity");
+        Assert(window.Opacity == 1, "hover restores full floating opacity");
+        hoverSurface.SetValue(mouseOverKey, false);
+        var fadeSurface = (System.Windows.Controls.Border)window.FindName("AgentListFadeSurface");
+        var agentPopup = (System.Windows.Controls.Primitives.Popup)window.FindName("AgentListPopup");
+        typeof(AqTracker.MainWindow).GetField("_trayRevealActive", flags)!.SetValue(window, false);
+        agentPopup.IsOpen = true;
+        window.Dispatcher.Invoke(() => { }, System.Windows.Threading.DispatcherPriority.ApplicationIdle);
+        window.Topmost = false;
+        var popupHandle = ((System.Windows.Interop.HwndSource)System.Windows.PresentationSource.FromVisual(agentPopup.Child)).Handle;
+        var nativeStyleMethod = typeof(AqTracker.MainWindow).GetMethod("GetExtendedWindowStyle", System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.NonPublic)!;
+        var popupStyle = ((IntPtr)nativeStyleMethod.Invoke(null, [popupHandle])!).ToInt64();
+        Assert((popupStyle & 8) == 0, "agent popup obeys disabled always-on-top rather than remaining above other applications");
+        bool NativeTopmost(IntPtr handle) => (((IntPtr)nativeStyleMethod.Invoke(null, [handle])!).ToInt64() & 8) != 0;
+        var mainHandle = new System.Windows.Interop.WindowInteropHelper(window).Handle;
+        Assert(!NativeTopmost(mainHandle), "main window also leaves the topmost band");
+        void AssertSwitcherStyle(bool selectable)
+        {
+            var currentHandle = new System.Windows.Interop.WindowInteropHelper(window).Handle;
+            var style = ((IntPtr)nativeStyleMethod.Invoke(null, [currentHandle])!).ToInt64();
+            Assert(window.ShowInTaskbar == selectable && ((style & TrayOnlyWindowPolicy.AppWindowExtendedStyle) != 0) == selectable &&
+                ((style & TrayOnlyWindowPolicy.ToolWindowExtendedStyle) != 0) != selectable,
+                "Alt+Tab native application/tool-window styles follow Always on top without losing other styles");
+        }
+        AssertSwitcherStyle(true);
+
+        window.Topmost = true;
+        mainHandle = new System.Windows.Interop.WindowInteropHelper(window).Handle;
+        AssertSwitcherStyle(false);
+        Assert(NativeTopmost(mainHandle) && NativeTopmost(popupHandle), "enabling always-on-top applies to both native windows");
+        window.Topmost = false;
+        mainHandle = new System.Windows.Interop.WindowInteropHelper(window).Handle;
+        AssertSwitcherStyle(true);
+        for (var reposition = 0; reposition < 10; reposition++) InvokeWindow("RepositionAgentListPopup");
+        Assert(!NativeTopmost(mainHandle) && !NativeTopmost(popupHandle), "popup reposition never restores topmost while disabled");
+        agentPopup.IsOpen = false;
+        agentPopup.IsOpen = true;
+        window.Dispatcher.Invoke(() => { }, System.Windows.Threading.DispatcherPriority.ApplicationIdle);
+        popupHandle = ((System.Windows.Interop.HwndSource)System.Windows.PresentationSource.FromVisual(agentPopup.Child)).Handle;
+        Assert(!NativeTopmost(popupHandle), "reopened popup preserves disabled topmost");
+
+
+        fadeSurface.SetValue(mouseOverKey, false);
+        InvokeWindow("UpdateFloatingOpacity");
+        Assert(window.Opacity == .5 && fadeSurface.Opacity == .5, "agent popup and compact widget share half opacity outside hover");
+        fadeSurface.SetValue(mouseOverKey, true);
+        InvokeWindow("UpdateFloatingOpacity");
+        Assert(window.Opacity == 1 && fadeSurface.Opacity == 1, "hovering agent list restores both surfaces to full opacity");
+        fadeSurface.SetValue(mouseOverKey, false);
+        InvokeWindow("UpdateFloatingOpacity");
+        Assert(window.Opacity == .5 && fadeSurface.Opacity == .5, "leaving the list fades both surfaces again");
+        agentPopup.IsOpen = false;
+        vm.Expanded = true;
+        RefreshModeSize();
+        Assert(window.Opacity == 1, "detailed mode stays opaque without hover");
+        var trayEntries = (System.Collections.IList)typeof(AqTracker.MainWindow).GetField("_quotaTray", flags)!.GetValue(window)!;
+        Assert(trayEntries.Count == vm.NotificationQuotas.Count, "tray mirrors all selected quota rows while floating window is visible");
+        vm.SetCompactQuotaDisplay("both");
+        vm.SetClaudeEnabled(true);
+        vm.ApplyQuota(new(profileCodexWindows, null, null, null, claudeTestNow));
+        vm.ApplyClaude(new(profileClaudeWindows, null, null, null, claudeTestNow), ClaudeConnectionState.Connected, false);
+        vm.SetProfileActivity(new(true, false, false, false), default);
+        vm.SetProfileActivity(default, default);
+        Assert(trayEntries.Count == 4, "all four available tray quotas survive idle state without foreground or active agents");
+        vm.SetProfileActivity(default, new(true, false, false, false));
+        Assert(trayEntries.Count == 4, "Claude-only foreground retains all notification quotas");
+        vm.SetCompactQuotaDisplay("5h");
+        Assert(trayEntries.Count == 2 && vm.NotificationQuotas.All(row => row.Label == "5h"), "tray respects five-hour selection for both profiles");
+        vm.SetCompactQuotaDisplay("7d");
+        Assert(trayEntries.Count == 2 && vm.NotificationQuotas.All(row => row.Label == "7d"), "tray respects weekly selection for both profiles");
+        vm.SetClaudeEnabled(false);
+        Assert(trayEntries.Count == 1, "disabled Claude profile is removed from tray");
+        vm.SetClaudeEnabled(true);
+        vm.ApplyClaude(null, ClaudeConnectionState.Disconnected, true);
+        Assert(trayEntries.Count == 1, "unavailable quotas never fabricate a tray percentage");
+        vm.SetCompactQuotaDisplay("both");
+        vm.ApplyClaude(new(profileClaudeWindows, null, null, null, claudeTestNow), ClaudeConnectionState.Connected, false);
+        foreach (var entry in trayEntries)
+        {
+            var notify = (System.Windows.Forms.NotifyIcon)entry.GetType().GetField("Notify")!.GetValue(entry)!;
+            Assert(notify.Visible && notify.Icon is not null, "every quota retains its rendered notification icon");
+        }
+        typeof(AqTracker.MainWindow).GetMethod("CloseWindow", flags)!.Invoke(window, [window, new System.Windows.RoutedEventArgs()]);
+        Assert(!window.IsVisible && trayEntries.Count == 4, "closing floating window preserves quota tray icons");
+        InvokeWindow("ShowFromTray");
+        var focusMethod = typeof(AqTracker.MainWindow).GetMethod("ApplyNotificationFocus", flags)!;
+        focusMethod.Invoke(window, [true]);
+        Assert(window.IsVisible, "notification reveal remains visible while focus belongs to widget, popup or owned dialog");
+        focusMethod.Invoke(window, [false]);
+        Assert(!window.IsVisible && !vm.IsAgentListOpen && trayEntries.Count == 4, "focus leaving notification reveal hides widget and agents while keeping every tray icon");
+        InvokeWindow("ShowFromTray");
+        Assert(window.IsVisible, "tray can reopen after focus dismissal");
+        var settingsField = typeof(AqTracker.MainWindow).GetField("_settings", flags)!;
+        var focusSettings = (AppSettings)settingsField.GetValue(window)!;
+        settingsField.SetValue(window, focusSettings with { ShowInNotificationArea = false });
+        focusMethod.Invoke(window, [false]);
+        Assert(window.IsVisible, "focus loss does not hide the widget when notification mode is disabled");
+        settingsField.SetValue(window, focusSettings);
+        var iconFactory = typeof(AqTracker.MainWindow).GetMethod("CreateQuotaTrayIcon", System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.NonPublic)!;
+        using var preview = new System.Drawing.Bitmap(384, 80);
+        using (var graphics = System.Drawing.Graphics.FromImage(preview))
+        {
+            graphics.Clear(System.Drawing.Color.Gray);
+            var samples = new[] { "0%", "50%", "100%", "9.5%", "99%", "99.5%" };
+            for (var i = 0; i < samples.Length; i++)
+            {
+                using var icon = (System.Drawing.Icon)iconFactory.Invoke(null, [samples[i], i % 2 == 0 ? "#0080FF" : "#D97757"])!;
+                graphics.DrawIcon(icon, new System.Drawing.Rectangle(i * 64, 0, 64, 64));
+                graphics.DrawIcon(icon, new System.Drawing.Rectangle(i * 64 + 24, 64, 16, 16));
+            }
+        }
+        preview.Save(Path.Combine(Path.GetDirectoryName(FindRepositoryFile("VERSION"))!, "artifacts", "notification-icons.png"));
     }
     catch (Exception error) { claudeUiFailure = error; }
     finally { window?.Close(); application?.Shutdown(); }

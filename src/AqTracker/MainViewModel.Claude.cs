@@ -23,6 +23,31 @@ public sealed partial class MainViewModel
         gauge.Window, QuotaPresentation.FormatWeeklyRemaining(gauge.Quota), gauge.Quota?.RemainingPercent ?? 0,
         ProfileBrush(gauge.Provider), ProfileWorking(gauge.Provider), GaugeTooltip(gauge),
         LocalizationManager.Format("ProfileQuotaIndicator", gauge.Provider, gauge.Window))).ToArray();
+    // The tray is an always-available overview, independent of foreground/work activity.
+    public IReadOnlyList<CompactQuotaRow> NotificationQuotas
+    {
+        get
+        {
+            var rows = new List<CompactQuotaRow>();
+            foreach (var provider in new[] { AgentProvider.Codex, AgentProvider.Claude })
+            {
+                if (provider == AgentProvider.Claude && !_claudeEnabled) continue;
+                foreach (var period in new[] { "5h", "7d" })
+                {
+                    if (_compactQuotaDisplay != "both" && _compactQuotaDisplay != period) continue;
+                    var quota = ProfileEngagementPolicy.Find(provider,
+                        provider == AgentProvider.Codex ? _codexWindows : _claudeWindows, period);
+                    if (quota is null || !quota.HasUsage) continue;
+                    var gauge = new ProfileGauge(provider, period, quota);
+                    rows.Add(new(period, QuotaPresentation.FormatWeeklyRemaining(quota), quota.RemainingPercent,
+                        ProfileBrush(provider), false, GaugeTooltip(gauge),
+                        LocalizationManager.Format("ProfileQuotaIndicator", provider, period)));
+                }
+            }
+            return rows;
+        }
+    }
+
     public void SetClaudeEnabled(bool enabled)
     {
         _claudeEnabled = enabled;
@@ -122,7 +147,7 @@ public sealed partial class MainViewModel
     }
     private void NotifyProfileProperties()
     {
-        foreach (var name in new[] { nameof(CompactQuotas), nameof(ShowCompactFiveHour), nameof(ShowCompactWeekly), nameof(CompactQuotaCount),
+        foreach (var name in new[] { nameof(NotificationQuotas), nameof(CompactQuotas), nameof(ShowCompactFiveHour), nameof(ShowCompactWeekly), nameof(CompactQuotaCount),
             nameof(CompactLeftLabel), nameof(CompactRightLabel), nameof(CompactLeftPercent), nameof(CompactRightPercent),
             nameof(CompactLeftAccessibleName), nameof(CompactRightAccessibleName),
             nameof(CompactLeftTooltip), nameof(CompactRightTooltip),

@@ -1,5 +1,25 @@
 # Changelog
 
+## [0.27.2] - 2026-10-02
+
+This release consolidates the unpublished changes since 0.25.1.
+
+### Added
+
+- Optional notification-area quota circles show all available quotas for enabled profiles and selected periods, independently of foreground activity. Icons use profile colors, contrasting numbers and descriptive tooltips; clicking restores the widget.
+- Optional 50% opacity for the compact floating widget and agent list; hovering either surface restores both to full opacity.
+- With Always on top disabled, the visible widget is selectable through Alt+Tab and the taskbar. Enabling it restores tool-window behavior.
+
+### Changed
+
+- Shared buttons, selections, hover states and update progress use grayscale highlights while preserving Codex and Claude colors. Enabled switches use a soft green background in both themes, including on hover.
+
+### Fixed
+
+- Widgets opened from notification icons return to the tray when focus leaves the application; internal popups and dialogs retain the reveal.
+- The agent list follows Always on top across toggles, repositioning and reopening.
+- Notification-area and floating-widget fade settings use consistent vertical spacing.
+
 ## [0.25.1] - 2026-10-02
 
 ### Changed

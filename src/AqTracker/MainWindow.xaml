@@ -110,7 +110,7 @@
           </Button>
           <Popup x:Name="AgentListPopup" Placement="Bottom" PlacementTarget="{Binding ElementName=AgentIndicatorButton}"
                  AllowsTransparency="True" StaysOpen="True" PopupAnimation="None" IsOpen="{Binding IsAgentListOpen}" HorizontalOffset="-149" VerticalOffset="-10" Opened="AgentListPopupOpened">
-            <Border Padding="15" Background="Transparent">
+            <Border x:Name="AgentListFadeSurface" Padding="15" Background="Transparent">
               <Border x:Name="AgentListWrapper" Width="288" MaxHeight="350" Background="Transparent" BorderThickness="0" RenderTransformOrigin="0.5,0">
                 <Border.RenderTransform><TransformGroup><ScaleTransform x:Name="AgentListWrapperScale" /><TranslateTransform x:Name="AgentListWrapperTranslate" /></TransformGroup></Border.RenderTransform>
                 <Border.Effect><DropShadowEffect BlurRadius="12" ShadowDepth="3" Opacity=".28" Color="#151A18" /></Border.Effect>
@@ -445,6 +445,8 @@
                         <TextBlock Text="{DynamicResource Loc.StartMinimizedWithWindows}" Style="{StaticResource SettingsRowLabel}" TextTrimming="None" TextWrapping="Wrap" Margin="0,0,10,0" />
                         <CheckBox x:Name="StartupBox" Grid.Column="1" Style="{StaticResource ThemeSwitch}" AutomationProperties.Name="{DynamicResource Loc.StartMinimizedWithWindows}" />
                       </Grid>
+                      <Grid Margin="0,4"><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions><TextBlock Text="{DynamicResource Loc.ShowInNotificationArea}" Style="{StaticResource SettingsRowLabel}" TextTrimming="None" TextWrapping="Wrap" Margin="0,0,10,0" /><CheckBox x:Name="NotificationAreaBox" Grid.Column="1" Style="{StaticResource ThemeSwitch}" AutomationProperties.Name="{DynamicResource Loc.ShowInNotificationArea}" /></Grid>
+                      <Grid Margin="0,4"><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions><TextBlock Text="{DynamicResource Loc.FadeFloatingWidget}" Style="{StaticResource SettingsRowLabel}" TextTrimming="None" TextWrapping="Wrap" Margin="0,0,10,0" /><CheckBox x:Name="FadeWidgetBox" Grid.Column="1" Style="{StaticResource ThemeSwitch}" AutomationProperties.Name="{DynamicResource Loc.FadeFloatingWidget}" /></Grid>
                       <Grid Margin="0,4">
                         <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
                         <TextBlock Text="{DynamicResource Loc.DetailedMode}" Style="{StaticResource SettingsRowLabel}" />
@@ -598,7 +600,7 @@
               <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Margin="0,15,0,14">
                 <StackPanel>
                   <TextBlock Text="{Binding UpdateAvailableMessage}" FontSize="12" TextWrapping="Wrap" Foreground="{DynamicResource SoftInk}" />
-                  <ProgressBar Value="{Binding UpdateProgress}" Maximum="1" Height="6" Margin="0,16,0,0" Background="{DynamicResource InputSurface}" Foreground="{DynamicResource Accent}"
+                  <ProgressBar Value="{Binding UpdateProgress}" Maximum="1" Height="6" Margin="0,16,0,0" Background="{DynamicResource InputSurface}" Foreground="{DynamicResource UiAccent}"
                                Visibility="{Binding IsUpdateDownloading, Converter={StaticResource BooleanToVisibility}}" />
                   <TextBlock Text="{Binding UpdateStatusMessage}" FontSize="10.4" Foreground="{DynamicResource SoftInk}" Margin="0,8,0,0" TextWrapping="Wrap" />
                 </StackPanel>
