@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.25.1] - 2026-10-02
+
+### Changed
+
+- New settings default to the dark theme with Codex blue (`#0080FF`) and Claude orange (`#D97757`), matching the current user preset. Existing saved theme and color choices remain preserved.
+
+### Fixed
+
+- Detailed widget controls consistently reveal over the entire visible surface, including empty header padding and the configuration button. Quota/layout refreshes and mode changes under a stationary pointer no longer clear hover; hidden controls release hit tests and Settings keeps them suppressed.
+
 ## [0.25.0] - 2026-10-02
 
 ### Added

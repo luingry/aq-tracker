@@ -6,7 +6,7 @@ public sealed record AccentThemePalette(string BaseHex, string AccentHex, string
 
 public static class AccentPalette
 {
-    public const string DefaultBaseHex = "#0D8F6F";
+    public const string DefaultBaseHex = "#0080FF";
     public const string DarkSurfaceHex = "#2D2D2D";
 
     public static string Normalize(string? value)

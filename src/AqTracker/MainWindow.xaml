@@ -21,7 +21,7 @@
         </Style.Triggers>
       </Style>
     </Border.Style>
-    <Grid x:Name="Root" MouseLeftButtonDown="DragWindow" MouseEnter="ShowChrome" MouseLeave="HideChrome">
+    <Grid x:Name="Root" MouseLeftButtonDown="DragWindow">
       <Grid x:Name="MainContent">
         <Grid.Style>
           <Style TargetType="Grid">
@@ -396,8 +396,27 @@
           </StackPanel>
         </ScrollViewer>
 
-        <Grid x:Name="Chrome" Panel.ZIndex="2" VerticalAlignment="Top" HorizontalAlignment="Right" Opacity="0"
+        <Grid x:Name="Chrome" Panel.ZIndex="2" VerticalAlignment="Top" HorizontalAlignment="Right"
               Visibility="{Binding Expanded, Converter={StaticResource BooleanToVisibility}}">
+          <Grid.Style>
+            <Style TargetType="Grid">
+              <Setter Property="Opacity" Value="0" />
+              <Setter Property="IsHitTestVisible" Value="False" />
+              <Style.Triggers>
+                <!-- Use the painted surface, including empty padding and chrome children.
+                     Layout/quota refreshes must never overwrite the current hover state. -->
+                <MultiDataTrigger>
+                  <MultiDataTrigger.Conditions>
+                    <Condition Binding="{Binding Expanded}" Value="True" />
+                    <Condition Binding="{Binding IsMouseOver, ElementName=WindowSurface}" Value="True" />
+                    <Condition Binding="{Binding Visibility, ElementName=SettingsPanel}" Value="Collapsed" />
+                  </MultiDataTrigger.Conditions>
+                  <Setter Property="Opacity" Value="1" />
+                  <Setter Property="IsHitTestVisible" Value="True" />
+                </MultiDataTrigger>
+              </Style.Triggers>
+            </Style>
+          </Grid.Style>
           <Grid.ColumnDefinitions><ColumnDefinition Width="Auto" /><ColumnDefinition Width="Auto" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
           <Button Grid.Column="0" Click="Settings" ToolTip="{DynamicResource Loc.Settings}" AutomationProperties.Name="{DynamicResource Loc.Settings}" Padding="5"><Viewbox Width="15" Height="15"><Canvas Width="24" Height="24"><Path Data="M12.22,2H11.78A2,2 0 0,0 9.78,4V4.18A2,2 0 0,1 8.78,5.91L8.35,6.16A2,2 0 0,1 6.35,6.16L6.2,6.08A2,2 0 0,0 3.47,6.81L3.25,7.19A2,2 0 0,0 3.98,9.92L4.13,10.02A2,2 0 0,1 5.13,11.74V12.25A2,2 0 0,1 4.13,13.99L3.98,14.08A2,2 0 0,0 3.25,16.81L3.47,17.19A2,2 0 0,0 6.2,17.92L6.35,17.84A2,2 0 0,1 8.35,17.84L8.78,18.09A2,2 0 0,1 9.78,19.82V20A2,2 0 0,0 11.78,22H12.22A2,2 0 0,0 14.22,20V19.82A2,2 0 0,1 15.22,18.09L15.65,17.84A2,2 0 0,1 17.65,17.84L17.8,17.92A2,2 0 0,0 20.53,17.19L20.75,16.81A2,2 0 0,0 20.02,14.08L19.87,13.99A2,2 0 0,1 18.87,12.25V11.74A2,2 0 0,1 19.87,10L20.02,9.91A2,2 0 0,0 20.75,7.18L20.53,6.8A2,2 0 0,0 17.8,6.07L17.65,6.15A2,2 0 0,1 15.65,6.15L15.22,5.9A2,2 0 0,1 14.22,4.17V4A2,2 0 0,0 12.22,2Z" Stroke="{DynamicResource SoftInk}" StrokeThickness="1.4" /><Ellipse Canvas.Left="9" Canvas.Top="9" Width="6" Height="6" Stroke="{DynamicResource SoftInk}" StrokeThickness="1.4" /></Canvas></Viewbox></Button>
           <Button Grid.Column="1" Click="ToggleDetailed" ToolTip="{DynamicResource Loc.ToggleDetailedMode}" AutomationProperties.Name="{DynamicResource Loc.ToggleDetailedMode}" Padding="5"><Viewbox Width="15" Height="15"><Canvas Width="24" Height="24"><Path Data="M5,7H19M5,12H19M5,17H19" Stroke="{DynamicResource SoftInk}" StrokeThickness="1.7" StrokeStartLineCap="Round" /></Canvas></Viewbox></Button>

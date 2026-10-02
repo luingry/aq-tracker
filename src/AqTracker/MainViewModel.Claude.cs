@@ -30,7 +30,7 @@ public sealed partial class MainViewModel
         PropertyChanged?.Invoke(this, new(nameof(ClaudeProfileEnabled)));
         RefreshProfilePresentation();
     }
-    private string _profileTheme = "Claro", _codexAccent = AccentPalette.DefaultBaseHex, _claudeAccent = "#D97757";
+    private string _profileTheme = "Escuro", _codexAccent = AccentPalette.DefaultBaseHex, _claudeAccent = "#D97757";
 
     private ProfileGauge LeftGauge => _profileGauges.FirstOrDefault() ?? new(AgentProvider.Codex, "5h", null);
     private ProfileGauge RightGauge => _profileGauges.LastOrDefault() ?? new(AgentProvider.Codex, "7d", null);

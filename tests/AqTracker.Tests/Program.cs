@@ -283,6 +283,13 @@ try
     var persistedUnread = new CompletedAgentWork("thread:turn", "thread", "Agent", "Entrega", "Concluído", "gpt-5.6-terra", "medium", DateTimeOffset.UtcNow.AddMinutes(-2), DateTimeOffset.UtcNow);
     var newerPersistedUnread = persistedUnread with { CompletionId = "thread:new-turn", CompletedAt = persistedUnread.CompletedAt.AddMinutes(1) };
     var persistedSettings = new AppSettings(Left: 412.5, Top: 237.25, IsExpanded: true, IsTopmost: false, CodexPath: @"C:\\Tools\\codex.exe", UsdBrl: 5.89m, Theme: "Escuro", CurrencyCode: "USD", ModeSizes: new WidgetModeSizes(new(90, 1), new(300, 480), new(300, 620)), IsAgentListExpanded: true, AccentColor: "#FFB000", LanguageCode: "en-US", UnreadAgentWorks: [persistedUnread, newerPersistedUnread]);
+    Assert(new AppSettings().Theme == "Escuro" && new SettingsStore(settingsTestPath).Load().Theme == "Escuro" &&
+        JsonSerializer.Deserialize<AppSettings>("{}")!.Theme == "Escuro", "fresh settings and JSON without a theme default to dark");
+    Assert(new SettingsStore(settingsTestPath).Load() is { AccentColor: "#0080FF", ClaudeAccentColor: "#D97757" } &&
+        SettingsStore.Normalize(JsonSerializer.Deserialize<AppSettings>("{}")!) is { AccentColor: "#0080FF", ClaudeAccentColor: "#D97757" },
+        "new settings and omitted JSON colors use the user's current Codex blue and Claude orange preset");
+    new SettingsStore(settingsTestPath).Save(new AppSettings(Theme: "Claro"));
+    Assert(new SettingsStore(settingsTestPath).Load().Theme == "Claro", "the dark default preserves an explicitly saved light theme");
     new SettingsStore(settingsTestPath).Save(persistedSettings);
     var reloadedSettings = new SettingsStore(settingsTestPath).Load();
     Assert(reloadedSettings.Left == 412.5 && reloadedSettings.Top == 237.25 && reloadedSettings.IsExpanded && !reloadedSettings.IsTopmost && reloadedSettings.CodexPath == @"C:\\Tools\\codex.exe" && reloadedSettings.UsdBrl == 5.89m && reloadedSettings.Theme == "Escuro" && reloadedSettings.CurrencyCode == "USD" && reloadedSettings.IsAgentListExpanded && reloadedSettings.AccentColor == "#FFB000" && reloadedSettings.LanguageCode == "en-US" && reloadedSettings.UnreadAgentWorks?.Single().CompletionId == "thread:new-turn", "settings round trip keeps only the latest unread execution per root chat while preserving existing preferences");
@@ -1786,6 +1793,106 @@ var claudeUiThread = new Thread(() =>
         Assert(GaugeHosts().Length == 1 && GaugeHosts()[0].Children.OfType<CircularQuotaGauge>().Single().Value == 60, "single Claude display uses its permitted quota without changing Codex detail analytics");
         vm.Expanded = true;
         window.Dispatcher.Invoke(() => { }, System.Windows.Threading.DispatcherPriority.ApplicationIdle);
+        var hoverSurface = (System.Windows.Controls.Border)window.FindName("WindowSurface");
+        var hoverRoot = (System.Windows.Controls.Grid)window.FindName("Root");
+        var chrome = (System.Windows.Controls.Grid)window.FindName("Chrome");
+        void RefreshModeSize() => typeof(AqTracker.MainWindow).GetMethod("ApplyWindowModeSize", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!.Invoke(window, null);
+        bool IsDescendantOf(System.Windows.DependencyObject hit, System.Windows.DependencyObject ancestor)
+        {
+            for (var current = hit; current is not null; current = System.Windows.Media.VisualTreeHelper.GetParent(current))
+                if (ReferenceEquals(current, ancestor)) return true;
+            return false;
+        }
+        RefreshModeSize();
+        window.UpdateLayout();
+        // Supply WPF's inherited mouse state deterministically without moving the user's
+        // cursor. Hit-test assertions below independently cover real input geometry.
+        var mouseOverKey = (System.Windows.DependencyPropertyKey)typeof(System.Windows.UIElement)
+            .GetField("IsMouseOverPropertyKey", System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.NonPublic)!.GetValue(null)!;
+        void SurfaceHover(bool hovered)
+        {
+            hoverSurface.SetValue(mouseOverKey, hovered);
+            window.Dispatcher.Invoke(() => { }, System.Windows.Threading.DispatcherPriority.ApplicationIdle);
+        }
+        bool ChromeShown() => chrome.Opacity == 1 && chrome.IsHitTestVisible && chrome.IsVisible;
+        var blankHit = window.InputHitTest(new System.Windows.Point(150, 5));
+        Assert(ReferenceEquals(blankHit, hoverSurface) && !hoverRoot.IsMouseOver,
+            "the empty detailed header hits the outer surface rather than the content root");
+        SurfaceHover(true);
+        Assert(ChromeShown(), "entering the detailed surface reveals chrome even over empty header space");
+        var config = chrome.Children.OfType<System.Windows.Controls.Button>().First();
+        var configBounds = config.TransformToAncestor(window).TransformBounds(new System.Windows.Rect(config.RenderSize));
+        var configHit = window.InputHitTest(new System.Windows.Point(configBounds.Left + configBounds.Width / 2, configBounds.Top + configBounds.Height / 2));
+        Assert(configHit is System.Windows.DependencyObject && IsDescendantOf((System.Windows.DependencyObject)configHit, config),
+            "revealed configuration button receives hit tests across the header");
+        for (var step = 0; step <= 100; step++)
+        {
+            var point = new System.Windows.Point(150 + (configBounds.Left + configBounds.Width / 2 - 150) * step / 100,
+                5 + (configBounds.Top + configBounds.Height / 2 - 5) * step / 100);
+            Assert(window.InputHitTest(point) is System.Windows.DependencyObject pathHit && IsDescendantOf(pathHit, hoverSurface),
+                "the entire path from empty header to configuration stays inside the hover surface");
+        }
+        hoverRoot.SetValue(mouseOverKey, true);
+        hoverRoot.SetValue(mouseOverKey, false);
+        Assert(ChromeShown(), "crossing content-root boundaries inside the surface never hides chrome");
+        for (var refresh = 0; refresh < 10; refresh++)
+        {
+            RefreshModeSize();
+            window.Dispatcher.Invoke(() => { }, System.Windows.Threading.DispatcherPriority.ApplicationIdle);
+            Assert(ChromeShown(), "quota and layout refresh keeps chrome visible under a stationary pointer");
+        }
+        SurfaceHover(false);
+        Assert(chrome.Opacity == 0 && !chrome.IsHitTestVisible, "leaving the surface hides chrome and releases its hit tests");
+        vm.Expanded = false;
+        RefreshModeSize();
+        SurfaceHover(true);
+        Assert(!ChromeShown(), "compact mode keeps chrome hidden while hovered");
+        Assert(hoverRoot.Background is null, "compact mode retains its transparent corner input geometry");
+        vm.Expanded = true;
+        RefreshModeSize();
+        window.Dispatcher.Invoke(() => { }, System.Windows.Threading.DispatcherPriority.ApplicationIdle);
+        Assert(ChromeShown(), "expanding under a stationary pointer reveals chrome without another MouseEnter");
+        config.RaiseEvent(new System.Windows.RoutedEventArgs(System.Windows.Controls.Primitives.ButtonBase.ClickEvent));
+        window.Dispatcher.Invoke(() => { }, System.Windows.Threading.DispatcherPriority.ApplicationIdle);
+        Assert(((System.Windows.Controls.Grid)window.FindName("SettingsPanel")).IsVisible && chrome.Opacity == 0 && !chrome.IsHitTestVisible,
+            "clicking configuration opens Settings and suppresses the underlying chrome");
+        typeof(AqTracker.MainWindow).GetMethod("Settings", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!.Invoke(window, [window, new System.Windows.RoutedEventArgs()]);
+        window.Dispatcher.Invoke(() => { }, System.Windows.Threading.DispatcherPriority.ApplicationIdle);
+        Assert(ChromeShown(), "closing Settings under a stationary pointer restores chrome");
+        SurfaceHover(false);
+        if (args.Contains("--preview-hover"))
+        {
+            foreach (var timerName in new[] { "_visibilityTimer", "_agentTimer", "_refreshTimer" })
+                ((System.Windows.Threading.DispatcherTimer)typeof(AqTracker.MainWindow).GetField(timerName, System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!.GetValue(window)!).Stop();
+            window.Title = "AqTracker hover regression preview";
+            window.ShowInTaskbar = true;
+            window.Opacity = 1;
+            window.Left = 80;
+            window.Top = 80;
+            window.Show();
+            // The desktop inspection API omits tray-only tool windows. Expose only this
+            // isolated fixture as an ordinary app window for the optional visual check.
+            var previewHandle = new System.Windows.Interop.WindowInteropHelper(window).Handle;
+            var getStyle = typeof(AqTracker.MainWindow).GetMethod("GetExtendedWindowStyle", System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.NonPublic)!;
+            var setStyle = typeof(AqTracker.MainWindow).GetMethod("SetExtendedWindowStyle", System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.NonPublic)!;
+            var previewStyle = ((IntPtr)getStyle.Invoke(null, [previewHandle])!).ToInt64();
+            setStyle.Invoke(null, [previewHandle, new IntPtr((previewStyle & ~0x80L) | 0x40000L)]);
+            window.Activate();
+            var previewFrame = new System.Windows.Threading.DispatcherFrame();
+            var previewTimer = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromMilliseconds(250) };
+            var previewUntil = DateTime.UtcNow.AddSeconds(60);
+            var previewRefreshes = 0;
+            previewTimer.Tick += (_, _) =>
+            {
+                RefreshModeSize();
+                Console.WriteLine($"hover-preview refresh={++previewRefreshes} surface={hoverSurface.IsMouseOver} root={hoverRoot.IsMouseOver} chrome={chrome.Opacity} hit={chrome.IsHitTestVisible} settings={((System.Windows.Controls.Grid)window.FindName("SettingsPanel")).Visibility}");
+                if (DateTime.UtcNow >= previewUntil) previewFrame.Continue = false;
+            };
+            previewTimer.Start();
+            System.Windows.Threading.Dispatcher.PushFrame(previewFrame);
+            previewTimer.Stop();
+            return;
+        }
         var consumption = (System.Windows.Controls.Expander)window.FindName("ConsumptionDetails");
         consumption.ApplyTemplate();
         var consumptionHeader = (System.Windows.Controls.Primitives.ToggleButton)consumption.Template.FindName("ConsumptionHeader", consumption);

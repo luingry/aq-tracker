@@ -103,7 +103,6 @@ public partial class MainWindow : Window
         AddHandler(Mouse.PreviewMouseUpEvent, new MouseButtonEventHandler(OnWindowPreviewMouseUp), true);
         LostMouseCapture += (_, _) => { if (_manualResize) FinishManualResize(false); };
         Deactivated += (_, _) => { if (_manualResize) FinishManualResize(false); };
-        Chrome.IsHitTestVisible = false;
         DataContext = _viewModel;
         _viewModel.PropertyChanged += (_, eventArgs) =>
         {
@@ -1151,22 +1150,8 @@ public partial class MainWindow : Window
         System.Windows.Media.Visual or System.Windows.Media.Media3D.Visual3D => System.Windows.Media.VisualTreeHelper.GetParent(current),
         _ => LogicalTreeHelper.GetParent(current)
     };
-    private void ShowChrome(object sender, System.Windows.Input.MouseEventArgs e)
-    {
-        if (!_viewModel.Expanded) return;
-        Chrome.IsHitTestVisible = true;
-        Chrome.Opacity = 1;
-    }
-
-    private void HideChrome(object sender, System.Windows.Input.MouseEventArgs e)
-    {
-        Chrome.Opacity = 0;
-        Chrome.IsHitTestVisible = false;
-    }
     private void ApplyWindowModeSize()
     {
-        Chrome.Opacity = 0;
-        Chrome.IsHitTestVisible = false;
         var mode = CurrentVisualMode;
         var size = WidgetSizePolicy.SelectModeSize(_settings.ModeSizes!, mode);
         if (mode == WidgetVisualMode.Detailed)

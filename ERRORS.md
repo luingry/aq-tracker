@@ -401,6 +401,13 @@
 - **Solucao:** estabelecer o baseline somente depois da inicializacao do estado de agentes e suprimir a restauracao automatica da lista enquanto o startup estiver oculto.
 - **Prevencao:** validar o executavel instalado com agentes realmente ativos e a lista expandida persistida, alem do smoke demo; exigir ausencia de janelas visiveis apos a primeira leitura e manter Mostrar da bandeja como restauracao explicita.
 
+## Hover dos controles desaparecia durante atualizacoes ou ao chegar em Configuracoes
+
+- **Sintoma:** no modo detalhado, passar o mouse nem sempre revelava Configuracoes; ao aproximar o ponteiro do botao, os controles podiam sumir e so voltar depois de sair e entrar novamente.
+- **Causa:** `ApplyWindowModeSize()` zerava `Chrome.Opacity` e desabilitava hit tests em cada snapshot de quota/mudanca de perfil, mesmo com o mouse dentro. A revelacao dependia de um novo `MouseEnter` no `Root`, sem background: espacos vazios do cabecalho atingiam somente a borda externa `WindowSurface`, causando `MouseLeave` no Root durante a travessia ate os botoes.
+- **Solucao:** um trigger declarativo controla opacidade e hit tests com `WindowSurface.IsMouseOver`, modo detalhado e Settings fechado. Removidos os handlers de entrada/saida e resets imperativos no resize; a superficie externa inclui padding e descendentes dos controles sem alterar os cantos transparentes do compacto.
+- **Prevencao:** nao sobrescrever estado de interacao em refreshes de dados/layout. Regressao WPF cobre o hit test do padding e botao, entrada/saida, dez refreshes com hover mantido, compacto e expansao sob ponteiro parado. O estado herdado de mouse e injetado apenas na fixture isolada; o preview WPF isolado confirmou com mouse real a travessia padding -> engrenagem, com refreshes de 250 ms e opacidade/hit tests mantidos.
+
 ## Atualizacao silenciosa podia reativar inicializacao desabilitada nas configuracoes
 
 - **Sintoma:** desabilitar o novo switch removia o Run, mas a proxima atualizacao silenciosa podia recria-lo.
