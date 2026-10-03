@@ -48,9 +48,12 @@ if (args.Contains("--benchmark-analytics", StringComparer.OrdinalIgnoreCase))
 
 var mainWindowSource = File.ReadAllText(FindRepositoryFile("src", "AqTracker", "MainWindow.xaml.cs"));
 var themeManagerSource = File.ReadAllText(FindRepositoryFile("src", "AqTracker", "ThemeManager.cs"));
-var loadedHandlerStart = mainWindowSource.IndexOf("Loaded += async (_, _) =>", StringComparison.Ordinal);
-var loadedHandlerEnd = mainWindowSource.IndexOf("Closing += OnClosing;", loadedHandlerStart, StringComparison.Ordinal);
+var loadedHandlerStart = mainWindowSource.IndexOf("private async void StartRuntime()", StringComparison.Ordinal);
+var loadedHandlerEnd = mainWindowSource.IndexOf("private void ShowFromTray()", loadedHandlerStart, StringComparison.Ordinal);
 var loadedHandler = mainWindowSource.Substring(loadedHandlerStart, loadedHandlerEnd - loadedHandlerStart);
+var visibilityStart = mainWindowSource.IndexOf("private void UpdateWidgetVisibility()", StringComparison.Ordinal);
+Assert(!mainWindowSource.Substring(visibilityStart, mainWindowSource.IndexOf("CodexDesktopWindowMonitor.ReadForeground()", visibilityStart, StringComparison.Ordinal) - visibilityStart).Contains("IsLoaded", StringComparison.Ordinal),
+    "automatic visibility runs for a hidden startup window that has a handle but was never shown (never Loaded)");
 Assert(loadedHandler.Contains("_ = LoadAsync();", StringComparison.Ordinal) &&
        loadedHandler.Contains("await RefreshAgentsAsync();", StringComparison.Ordinal) &&
        loadedHandler.Contains("_ = RefreshAnalyticsAsync();", StringComparison.Ordinal) &&
@@ -305,6 +308,10 @@ try
     try { new SettingsStore(settingsTestPath).Load(); }
     catch (InvalidDataException) { rejectedCorruption = true; }
     Assert(rejectedCorruption && File.ReadAllText(settingsTestPath) == "null", "unrecoverable settings never silently become defaults that overwrite user data");
+    var corruptionRetries = 0;
+    try { await new SettingsStore(settingsTestPath).LoadWhenAvailableAsync(() => { corruptionRetries++; return Task.CompletedTask; }); }
+    catch (InvalidDataException) { }
+    Assert(corruptionRetries == 0 && File.ReadAllText(settingsTestPath) == "null", "startup does not retry corrupt JSON or overwrite it with defaults");
     var settingsStore = new SettingsStore(settingsTestPath);
     settingsStore.Save(persistedSettings with { StartMinimizedWithWindows = true, ClaudeAccentColor = "#AA7755", ClaudeProfileEnabled = false });
     Assert(settingsStore.Load().StartMinimizedWithWindows && !settingsStore.Load().ClaudeProfileEnabled && settingsStore.Load().ClaudeAccentColor == "#AA7755", "startup and Claude preferences survive an actual disk round trip");
@@ -319,6 +326,28 @@ try
         Assert(saveRejected, "a blocked atomic replacement fails without truncating the original settings");
     }
     Assert(savedBytes.SequenceEqual(File.ReadAllBytes(settingsTestPath)) && !Directory.GetFiles(settingsTestDirectory, "*.tmp").Any(), "failed replacement preserves exact primary bytes and cleans temporary files");
+    var startupLock = new FileStream(settingsTestPath, FileMode.Open, FileAccess.ReadWrite, FileShare.None);
+    var startupRetries = 0;
+    try
+    {
+        var bootSettings = await settingsStore.LoadWhenAvailableAsync(() =>
+        {
+            startupRetries++;
+            startupLock.Dispose();
+            return Task.CompletedTask;
+        });
+        Assert(startupRetries == 1 && bootSettings.StartMinimizedWithWindows && bootSettings.ClaudeAccentColor == "#AA7755",
+            "startup waits for a temporarily locked primary and preserves preferences instead of aborting or using defaults");
+    }
+    finally { startupLock.Dispose(); }
+    using (var permanentLock = new FileStream(settingsTestPath, FileMode.Open, FileAccess.ReadWrite, FileShare.None))
+    {
+        startupRetries = 0;
+        var failedSafely = false;
+        try { await settingsStore.LoadWhenAvailableAsync(() => { startupRetries++; return Task.CompletedTask; }); }
+        catch (IOException) { failedSafely = true; }
+        Assert(failedSafely && startupRetries == 9, "startup retries are bounded and never overwrite inaccessible preferences");
+    }
 }
 finally
 {
@@ -377,6 +406,22 @@ Assert(SettingsStore.Normalize(new AppSettings(CompactQuotaDisplay: "5h")).Compa
 Assert(WidgetVisibilityPolicy.ShouldShow(true, false, false, true, false) && WidgetVisibilityPolicy.ShouldShow(false, true, false, true, false), "active and unread completed work force visibility even while Codex is backgrounded or minimized");
 Assert(WidgetVisibilityPolicy.ShouldShow(false, false, true, false, false) && WidgetVisibilityPolicy.ShouldShow(false, false, false, false, true), "Codex foreground and direct widget interaction keep the widget visible");
 Assert(!WidgetVisibilityPolicy.ShouldShow(false, false, false, false, false) && !WidgetVisibilityPolicy.ShouldShow(false, false, true, true, false), "idle widget hides immediately when Codex is backgrounded or minimized");
+{
+    var signInWork = new ProfileActivity(false, false, true, false);
+    var gate = new StartupVisibilityGate();
+    Assert(!gate.Release(signInWork, default) && !gate.Release(signInWork, default), "work already present at sign-in keeps a hidden startup widget out of the way");
+    Assert(gate.Release(signInWork, new ProfileActivity(true, false, false, false)), "focusing Claude while Codex work persisted since sign-in restores dynamic visibility without a tray click");
+    var idleGate = new StartupVisibilityGate();
+    Assert(!idleGate.Release(default, default) && idleGate.Release(new ProfileActivity(true, false, false, false), default), "first engagement after an idle sign-in restores dynamic visibility");
+}
+{
+    string NoFolder(Environment.SpecialFolder _) => "";
+    Assert(UserFolders.Resolve(Environment.SpecialFolder.ApplicationData, "APPDATA", @"AppData\Roaming", NoFolder, name => name == "APPDATA" ? @"C:\Users\u\AppData\Roaming" : null) == @"C:\Users\u\AppData\Roaming",
+        "sign-in without shell folders resolves app data from the environment instead of a System32-relative path");
+    Assert(UserFolders.Resolve(Environment.SpecialFolder.LocalApplicationData, "LOCALAPPDATA", @"AppData\Local", NoFolder, name => name == "USERPROFILE" ? @"C:\Users\u" : name == "LOCALAPPDATA" ? "AqTracker" : null) == @"C:\Users\u\AppData\Local",
+        "relative or missing folder values fall back to the user profile");
+    Assert(Path.IsPathRooted(UserFolders.ApplicationData) && Path.IsPathRooted(UserFolders.LocalApplicationData) && Path.IsPathRooted(UserFolders.UserProfile), "production user folders are always absolute");
+}
 Assert(CodexDesktopWindowMonitor.IsCodexDesktopExecutable(@"C:\Program Files\WindowsApps\OpenAI.Codex_26.810.4967.0_x64__2p2nqsd0c76g0\app\ChatGPT.exe") && CodexDesktopWindowMonitor.IsCodexDesktopExecutable(@"C:\Program Files\WindowsApps\OpenAI.Codex_26.810.4967.0_x64__2p2nqsd0c76g0\app\resources\codex.exe") && !CodexDesktopWindowMonitor.IsCodexDesktopExecutable(@"C:\Users\user\.codex\plugins\.plugin-appserver\codex.exe") && !CodexDesktopWindowMonitor.IsCodexDesktopExecutable(@"C:\Tools\ChatGPT.exe"), "desktop window detection accepts the real ChatGPT host and packaged Codex process while rejecting unrelated or CLI executables");
 var codexDesktopPath = @"C:\Program Files\WindowsApps\OpenAI.Codex_26.810.4967.0_x64__2p2nqsd0c76g0\app\ChatGPT.exe";
 Assert(!CodexDesktopWindowMonitor.Observe(codexDesktopPath, false, false, false).IsForeground && !CodexDesktopWindowMonitor.Observe(codexDesktopPath, true, true, false).IsForeground && CodexDesktopWindowMonitor.Observe(codexDesktopPath, true, false, false).IsForeground && CodexDesktopWindowMonitor.Observe(codexDesktopPath, true, false, true) is { IsForeground: true, IsMinimized: true }, "desktop window observation rejects hidden and cloaked Codex HWNDs while retaining a visible minimized Codex window for the visibility policy");
@@ -1668,6 +1713,19 @@ try
         Assert(rejectedClient.State == ClaudeConnectionState.Reconnect && rejectedStore.Load() is null && rejectedClient.IsStale, "invalid_grant/400/401 refresh requires reconnect and removes invalid credentials");
     }
     var retryRejectedStore = new TestClaudeTokenStore(originalTokens);
+    var temporarilyLockedTokens = Path.Combine(claudeFixtureRoot, "locked-startup.dat");
+    var diskTokens = new ClaudeTokenStore(temporarilyLockedTokens);
+    diskTokens.Save(originalTokens);
+    ClaudeUsageClient delayedClient;
+    using (var lockedTokens = new FileStream(temporarilyLockedTokens, FileMode.Open, FileAccess.ReadWrite, FileShare.None))
+        delayedClient = new ClaudeUsageClient(diskTokens, Path.Combine(claudeFixtureRoot, "delayed-startup.json"), "test",
+            new TestHttpHandler((_, _) => Task.FromResult(JsonResponse(HttpStatusCode.OK, "{}"))), () => claudeTestNow);
+    using (delayedClient)
+    {
+        await delayedClient.RefreshAsync(CancellationToken.None);
+        Assert(delayedClient.State == ClaudeConnectionState.Connected && !delayedClient.IsStale,
+            "Claude recovers a token file temporarily unavailable at startup without another login or process restart");
+    }
     foreach (var rejectedUsageStatus in new[] { HttpStatusCode.BadRequest, HttpStatusCode.Unauthorized })
     {
         var preemptiveStore = new TestClaudeTokenStore(originalTokens with { ExpiresAt = claudeTestNow.AddMinutes(1) });
@@ -1740,11 +1798,13 @@ var claudeUiThread = new Thread(() =>
         application.InitializeComponent();
         window = new AqTracker.MainWindow(demo: true, settingsStore: new SettingsStore(Path.Combine(claudeUiRoot, "settings.json")), startMinimized: true,
             windowsStartup: new WindowsStartupRegistration(RuntimePaths.ExecutablePath, startupTestKey));
-        // Real layout requires a presentation source; keep the demo transparent and unfocused.
-        window.Opacity = 0;
-        window.Show();
+        // Hidden startup creates the HWND without ever showing the window, so no DWM shadow is left behind.
+        window.Start();
         window.Dispatcher.Invoke(() => { }, System.Windows.Threading.DispatcherPriority.ApplicationIdle);
+        Assert(!window.IsVisible && new System.Windows.Interop.WindowInteropHelper(window).Handle != IntPtr.Zero && NearlyEqual(window.Opacity, 1),
+            "hidden startup owns a real HWND but is never shown and never parks a transparent window on screen");
         Assert(application.Windows.Count == 1 && ReferenceEquals(application.MainWindow, window), "WPF smoke owns only its isolated window and never starts a production tracker against real user preferences or Claude tokens");
+        Assert(File.Exists(Path.Combine(claudeUiRoot, "quota-history.json")), "WPF demo writes quota history alongside its isolated settings instead of the user's data");
         Assert(!window.IsVisible && !window.ShowActivated, "Windows sign-in initializes the real WPF window hidden in the tray without stealing focus");
         typeof(AqTracker.MainWindow).GetMethod("ShowFromTray", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!.Invoke(window, null);
         Assert(window.IsVisible, "the tray Show action restores a tracker started minimized");

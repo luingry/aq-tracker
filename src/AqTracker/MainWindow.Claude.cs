@@ -26,6 +26,7 @@ public partial class MainWindow
             Path.Combine(_store.DirectoryPath, "claude-quota.json"), CurrentVersion);
         _viewModel.SetClaudeEnabled(_settings.ClaudeProfileEnabled);
         _viewModel.ApplyClaude(_claudeClient.Snapshot, _claudeClient.State, true);
+        SanitizedLogger.Write("Claude startup state: " + _claudeClient.State);
     }
 
     private IReadOnlyList<CompletedAgentWork> VisibleUnreadWorks() => _unreadAgentWorks

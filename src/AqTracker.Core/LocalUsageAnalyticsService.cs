@@ -134,7 +134,7 @@ public sealed class LocalUsageAnalyticsService
         var quotaTimeline = new Dictionary<QuotaTimelineKey, TimedQuotaUsage>();
         var roots = root is not null
             ? [root]
-            : DefaultRoots(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile));
+            : DefaultRoots(UserFolders.UserProfile);
         var fallbackModels = ReadFallbackModels(root);
         var fallbackTitles = ReadFallbackTitles(root);
         var files = roots.Where(Directory.Exists).SelectMany(path => Directory.EnumerateFiles(path, "*.jsonl", SearchOption.AllDirectories))
@@ -320,7 +320,7 @@ public sealed class LocalUsageAnalyticsService
 
     private IReadOnlyDictionary<string, string> ReadFallbackModels(string? root)
     {
-        var databasePath = _stateDatabasePath ?? (root is null ? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".codex", "state_5.sqlite") : null);
+        var databasePath = _stateDatabasePath ?? (root is null ? Path.Combine(UserFolders.UserProfile, ".codex", "state_5.sqlite") : null);
         if (string.IsNullOrWhiteSpace(databasePath)) return new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         if (_threadModelIndex is null || !string.Equals(_threadModelIndexPath, databasePath, StringComparison.OrdinalIgnoreCase))
         {
@@ -332,7 +332,7 @@ public sealed class LocalUsageAnalyticsService
 
     private IReadOnlyDictionary<string, string> ReadFallbackTitles(string? root)
     {
-        var databasePath = _stateDatabasePath ?? (root is null ? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".codex", "state_5.sqlite") : null);
+        var databasePath = _stateDatabasePath ?? (root is null ? Path.Combine(UserFolders.UserProfile, ".codex", "state_5.sqlite") : null);
         if (string.IsNullOrWhiteSpace(databasePath)) return new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         if (_threadTitleIndex is null || !string.Equals(_threadTitleIndexPath, databasePath, StringComparison.OrdinalIgnoreCase))
         {

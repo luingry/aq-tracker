@@ -17,10 +17,11 @@ namespace AqTracker;
 
 public partial class MainWindow : Window
 {
-    private readonly SettingsStore _store = new();
+    private readonly SettingsStore _store;
     private readonly WindowsStartupRegistration _windowsStartup;
     private bool _startupHidden;
-    private bool? _startupEngaged;
+    private readonly StartupVisibilityGate _startupGate = new();
+    private bool _runtimeStarted;
     private readonly MainViewModel _viewModel;
     private readonly CancellationTokenSource _shutdown = new();
     private readonly LocalUsageAnalyticsService _analytics = new();
@@ -85,19 +86,18 @@ public partial class MainWindow : Window
     [Flags]
     private enum ResizeEdge { None = 0, Left = 1, Top = 2, Right = 4, Bottom = 8 }
 
-    public MainWindow(bool demo = false, SettingsStore? settingsStore = null, bool startMinimized = false, WindowsStartupRegistration? windowsStartup = null)
+    public MainWindow(bool demo = false, SettingsStore? settingsStore = null, bool startMinimized = false, WindowsStartupRegistration? windowsStartup = null, AppSettings? initialSettings = null)
     {
-        if (settingsStore is not null) _store = settingsStore;
+        _store = settingsStore ?? new();
         _windowsStartup = windowsStartup ?? new WindowsStartupRegistration(RuntimePaths.ExecutablePath);
         _startupHidden = startMinimized;
-        if (startMinimized) { ShowActivated = false; Opacity = 0; }
-        _settings = _store.Load();
+        _settings = initialSettings ?? _store.Load();
         _startupHidden |= _settings.ShowInNotificationArea;
-        if (_startupHidden) { ShowActivated = false; Opacity = 0; }
+        if (_startupHidden) ShowActivated = false;
         _unreadAgentWorks = (_settings.UnreadAgentWorks ?? []).OrderByDescending(work => work.CompletedAt).ToList();
         _observedCompletionIds.UnionWith(_unreadAgentWorks.Select(work => work.CompletionId));
         LocalizationManager.Apply(_settings.LanguageCode);
-        _viewModel = new MainViewModel(new QuotaSnapshotStore());
+        _viewModel = new MainViewModel(new QuotaSnapshotStore(Path.Combine(_store.DirectoryPath, "quota-history.json")));
         InitializeClaude();
         InitializeComponent();
         AddHandler(Mouse.PreviewMouseDownEvent, new MouseButtonEventHandler(OnWindowPreviewMouseDown), true);
@@ -135,19 +135,10 @@ public partial class MainWindow : Window
         ApplyWindowModeSize();
         Left = _settings.Left;
         Top = _settings.Top;
-        Loaded += async (_, _) =>
+        Loaded += (_, _) =>
         {
             if (_startupHidden) Hide();
-            UpdateFloatingOpacity();
-            _refreshTimer.Start();
-            _agentTimer.Start();
-            _visibilityTimer.Start();
-            _ = LoadAsync();
-            _ = RefreshClaudeAsync();
-            await RefreshAgentsAsync();
-            UpdateWidgetVisibility();
-            _ = RefreshAnalyticsAsync();
-            _ = CheckForUpdatesIfDueAsync();
+            StartRuntime();
         };
         Closing += OnClosing;
         SourceInitialized += OnSourceInitialized;
@@ -532,6 +523,34 @@ public partial class MainWindow : Window
         UpdateQuotaTray();
     }
 
+    /// <summary>
+    /// Starts the tracker. A window that begins hidden only gets its HWND (tray, hooks,
+    /// backdrop) and is never shown: showing a layered window at Opacity 0 and hiding it
+    /// afterwards left an orphan DWM shadow on screen during Windows sign-in.
+    /// </summary>
+    public void Start()
+    {
+        if (!_startupHidden) { Show(); return; }
+        new WindowInteropHelper(this).EnsureHandle();
+        StartRuntime();
+    }
+
+    private async void StartRuntime()
+    {
+        if (_runtimeStarted) return;
+        _runtimeStarted = true;
+        UpdateFloatingOpacity();
+        _refreshTimer.Start();
+        _agentTimer.Start();
+        _visibilityTimer.Start();
+        _ = LoadAsync();
+        _ = RefreshClaudeAsync();
+        await RefreshAgentsAsync();
+        UpdateWidgetVisibility();
+        _ = RefreshAnalyticsAsync();
+        _ = CheckForUpdatesIfDueAsync();
+    }
+
     private void ShowFromTray()
     {
         _trayRevealActive = _settings.ShowInNotificationArea;
@@ -644,7 +663,7 @@ public partial class MainWindow : Window
 
     private void UpdateWidgetVisibility()
     {
-        if (_demo || !IsLoaded) return;
+        if (_demo || !_runtimeStarted) return;
         var desktop = CodexDesktopWindowMonitor.ReadForeground();
         var codex = new ProfileActivity(desktop.Provider == AgentProvider.Codex, desktop.IsMinimized,
             _viewModel.ActiveAgents.Any(row => row.Provider == AgentProvider.Codex),
@@ -659,22 +678,18 @@ public partial class MainWindow : Window
         var shouldShow = WidgetVisibilityPolicy.ShouldShow(
             codex, claude,
             IsActive || AgentListPopup.IsOpen);
-        // Do not reopen immediately for work already present at sign-in. Resume normal
-        // visibility on the next idle -> engaged transition, or explicitly from the tray.
+        // Do not reopen immediately for activity already present at sign-in. Resume normal
+        // visibility on the first activity change, or explicitly from the tray.
         if (_startupHidden)
         {
             // The first agent snapshot belongs to startup, even when it arrives after
             // the first visibility timer tick. Do not misclassify it as newly started work.
-            if (!_agentStateInitialized) return;
-            var engaged = codex.IsEngaged || claude.IsEngaged;
-            if (_startupEngaged is null) { _startupEngaged = engaged; return; }
-            if (!engaged) _startupEngaged = false;
-            if (_startupEngaged == true || !engaged) return;
+            if (!_agentStateInitialized || !_startupGate.Release(codex, claude)) return;
             _startupHidden = false;
         }
         if (shouldShow)
         {
-            if (!IsVisible) Show();
+            if (!IsVisible) { UpdateFloatingOpacity(); Show(); }
             return;
         }
         if (!IsVisible) return;

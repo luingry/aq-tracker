@@ -10,7 +10,7 @@ public sealed class QuotaSnapshotStore
     private readonly bool _persistent;
     private readonly List<TimedQuotaUsage> _memory = [];
     private readonly List<TimedQuotaUsage> _initialMemory = [];
-    public QuotaSnapshotStore(string? path = null, bool persistent = true) { _persistent = persistent; _path = path ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "AqTracker", "quota-history.json"); _initialPath = Path.ChangeExtension(_path, "initial.json"); }
+    public QuotaSnapshotStore(string? path = null, bool persistent = true) { _persistent = persistent; _path = path ?? Path.Combine(UserFolders.ApplicationData, "AqTracker", "quota-history.json"); _initialPath = Path.ChangeExtension(_path, "initial.json"); }
 
     public IReadOnlyList<TimedQuotaUsage> Read()
     {

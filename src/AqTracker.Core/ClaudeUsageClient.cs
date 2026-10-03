@@ -99,7 +99,17 @@ public sealed class ClaudeUsageClient : IDisposable
         if (!await _gate.WaitAsync(0, cancellationToken).ConfigureAwait(false)) return;
         try
         {
-            if (_tokens is null || _clock() < _nextAttempt || onlyIfStale && Snapshot is not null && !IsStale && _clock() - Snapshot.ReceivedAt <= TimeSpan.FromSeconds(60)) return;
+            if (_clock() < _nextAttempt) return;
+            // A sharing/DPAPI failure during sign-in must not permanently disconnect
+            // a client whose credentials are still safely persisted on disk.
+            if (_tokens is null && State == ClaudeConnectionState.Disconnected)
+            {
+                _tokens = _store.Load();
+                if (_tokens is null) { _nextAttempt = _clock().AddSeconds(60); return; }
+                State = ClaudeConnectionState.Connected;
+                SanitizedLogger.Write("Claude credentials recovered after initial load was unavailable.");
+            }
+            if (_tokens is null || onlyIfStale && Snapshot is not null && !IsStale && _clock() - Snapshot.ReceivedAt <= TimeSpan.FromSeconds(60)) return;
             var refreshed = false;
             if (_tokens.ExpiresAt - _clock() < TimeSpan.FromMinutes(5))
             {

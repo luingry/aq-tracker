@@ -10,8 +10,8 @@ public static class LegacyDataMigration
     private const string InUseMarker = "settings.json";
 
     public static void MigrateRoamingData() => MigrateDirectory(
-        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), LegacyFolderName),
-        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), FolderName));
+        Path.Combine(UserFolders.ApplicationData, LegacyFolderName),
+        Path.Combine(UserFolders.ApplicationData, FolderName));
 
     /// <summary>
     /// Moves <paramref name="legacyDirectory"/> into <paramref name="directory"/> unless the new folder is

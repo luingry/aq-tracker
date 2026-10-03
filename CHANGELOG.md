@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.29.5] - 2026-10-03
+
+### Fixed
+
+- Starting with Windows no longer loses preferences, Claude credentials, history and logs: user folders are resolved without shell verification and fall back to the environment/profile, so they never become paths relative to System32 when sign-in runs before the profile folders are ready.
+- Hidden startup no longer leaves an invisible, non-interactive window with only its shadow on screen: the window creates its handle without being shown instead of being shown transparent and hidden afterwards.
+- A widget started hidden returns to automatic show/hide on the first activity change after sign-in (focusing Codex/Claude, new or finished work) at its configured opacity, without opening it from the notification area first.
+- Claude retries loading persisted credentials after temporary startup access failures, recovering without another login or process restart.
+- Startup retries temporarily inaccessible preferences for up to nine seconds, preserves existing data on failure, and reports a persistent read failure instead of silently terminating.
+- Startup diagnostics record the running version, startup mode, settings path and Claude connection state without credentials.
+- Isolated WPF windows also isolate quota history, preventing UI tests from changing the user's real quota cache.
+
 ## [0.29.1] - 2026-10-02
 
 ### Fixed

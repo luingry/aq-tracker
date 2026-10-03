@@ -6,7 +6,7 @@ public static class CodexExecutableDiscovery
     {
         if (!string.IsNullOrWhiteSpace(configuredPath)) yield return configuredPath!;
         foreach (var item in FindOnPath()) yield return item;
-        var home = userProfile ?? Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        var home = userProfile ?? UserFolders.UserProfile;
         yield return Path.Combine(home, ".codex", "plugins", ".plugin-appserver", "codex.exe");
         yield return Path.Combine(home, ".local", "bin", "codex.exe");
     }

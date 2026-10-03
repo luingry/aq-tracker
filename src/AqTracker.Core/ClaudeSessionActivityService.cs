@@ -23,8 +23,8 @@ public sealed class ClaudeSessionActivityService
     public ClaudeSessionActivityService(string? sessionsRoot = null, string? metadataRoot = null,
         Func<int, bool>? isAlive = null, Func<DateTimeOffset>? clock = null)
     {
-        _sessionsRoot = sessionsRoot ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".claude", "sessions");
-        _metadataRoot = metadataRoot ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Claude", "claude-code-sessions");
+        _sessionsRoot = sessionsRoot ?? Path.Combine(UserFolders.UserProfile, ".claude", "sessions");
+        _metadataRoot = metadataRoot ?? Path.Combine(UserFolders.ApplicationData, "Claude", "claude-code-sessions");
         _isAlive = isAlive ?? IsProcessAlive;
         _clock = clock ?? (() => DateTimeOffset.UtcNow);
     }

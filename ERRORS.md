@@ -1,5 +1,40 @@
 # Erros e solucoes conhecidas
 
+## Pastas do usuario vazias no login do Windows (Claude desconectado, preferencias padrao, sem log)
+
+- **Sintoma:** iniciando pelo Run (`--startup`) no boot, o Claude aparecia desconectado e o widget seguia preferencias diferentes; a instancia rodava por dezenas de minutos sem escrever nenhuma linha no `aq-tracker.log` (nem `Application startup`) e nenhum arquivo de dados era alterado. Iniciar manualmente o mesmo comando funcionava.
+- **Causa:** `Environment.GetFolderPath(SpecialFolder.X)` no .NET Framework verifica a pasta e retorna `""` quando o shell ainda nao disponibilizou as pastas do perfil no inicio da sessao. Todos os caminhos (`settings.json`, `claude-tokens.dat`, log) viravam relativos ao diretorio de trabalho (System32): nao encontrados/sem permissao, falhas engolidas silenciosamente.
+- **Solucao:** `UserFolders` (Core) resolve com `SpecialFolderOption.DoNotVerify`, cai para variaveis de ambiente (`APPDATA`/`LOCALAPPDATA`/`USERPROFILE`/`HOMEDRIVE+HOMEPATH`) e nunca devolve caminho relativo. Todo o codigo usa `UserFolders` em vez de `GetFolderPath`.
+- **Prevencao:** nunca chamar `Environment.GetFolderPath` diretamente; ao diagnosticar boot, ausencia total de log da instancia e sinal de caminho errado, nao de travamento. A entrada "Indisponibilidade transitoria no startup" abaixo tratava sintomas secundarios do mesmo cenario.
+
+## Widget iniciado oculto nunca reaparecia sozinho
+
+- **Sintoma:** apos o boot o widget so voltava a aparecer/ocultar dinamicamente depois de abrir pelo tray.
+- **Causa:** o startup oculto exigia ciclo ocioso -> engajado; com Codex/Claude iniciando com trabalho ativo ou nao lido, o estado nunca ficava ocioso.
+- **Solucao:** `StartupVisibilityGate` libera a visibilidade normal na primeira mudanca de atividade em relacao ao snapshot inicial.
+
+## Janela fantasma (so sombra) no startup oculto e widget sem reaparecer
+
+- **Sintoma:** apos o login no Windows ficava um retangulo invisivel com sombra, do tamanho do widget detalhado, sem interacao; sumia ao abrir pelo tray. O widget nao reaparecia sozinho ate ser aberto pela area de notificacao.
+- **Causa:** o startup oculto fazia `Show()` com `Opacity = 0` e so escondia no `Loaded`. A janela e layered (`AllowsTransparency`), mas o `Backdrop` habilita renderizacao DWM/cantos, entao o DWM desenha sombra mesmo com conteudo transparente. Quando a janela ficava visivel com opacidade 0, `IsVisible` era true e a visibilidade automatica nunca chamava `Show()`/ajustava opacidade.
+- **Solucao:** `MainWindow.Start()` usa `WindowInteropHelper.EnsureHandle()` quando inicia oculta (nunca mostra) e roda o runtime em `StartRuntime()` idempotente; a opacidade e calculada antes de cada `Show()` automatico.
+- **Regressao (0.29.3-0.29.4):** `UpdateWidgetVisibility` saia com `!IsLoaded`; janela criada so com `EnsureHandle` nunca dispara `Loaded`, entao o widget ficava apenas no tray. Corrigido usando `_runtimeStarted`.
+- **Prevencao:** nunca esconder janela "mostrando transparente"; criar so o HWND. Com `EnsureHandle`, nao usar `IsLoaded` como sinal de "app inicializado". O teste de Topmost da suite WPF e ocasionalmente instavel (corrida de foco) — reexecutar antes de investigar.
+
+## Indisponibilidade transitoria no startup deixava Claude desconectado ate reiniciar
+
+- **Sintoma:** credenciais validas e preferencias continuavam no disco, mas o usuario precisava reconectar o Claude; reiniciar o processo recuperou o estado esperado em 2026-10-03. O registro Run apontava para a instalacao correta. O gatilho exato do boot relatado nao ficou registrado e nao foi atribuido a renomeacao.
+- **Causa reproduzida:** `ClaudeTokenStore.Load` retorna null em falhas temporarias de leitura/DPAPI e `RefreshAsync` retornava para sempre sem reler o store. Separadamente, uma falha temporaria ao ler preferencias encerrava o startup sem novas tentativas.
+- **Solucao:** reler credenciais durante polling quando desconectado, respeitando intervalo e sem repetir credenciais rejeitadas; aguardar ate nove segundos pela leitura das preferencias antes de criar a janela e informar falha persistente preservando os arquivos. Registrar versao, modo de startup, caminho de preferencias e estado Claude sem segredos.
+- **Prevencao:** regressao segura o arquivo DPAPI com FileShare.None durante a construcao e exige recuperacao apos libera-lo; preferencias cobrem liberacao do lock e limite de tentativas. Nao confundir teste de `--startup` com prova de reboot fisico.
+
+## Fixture WPF ainda alterava o historico real de cotas
+
+- **Sintoma:** hash de quota-history.json mudava ao executar testes, apesar do isolamento de preferencias e tokens.
+- **Causa:** MainWindow recebia SettingsStore isolado, mas criava QuotaSnapshotStore com o caminho padrao do usuario.
+- **Solucao:** derivar o caminho de historico do diretorio do SettingsStore injetado.
+- **Prevencao:** exigir historico dentro da fixture e comparar hashes de todos os dados reais antes/depois da suite com a instancia de producao encerrada.
+
 ## Callback do layout detalhado executava sem PresentationSource
 
 - **Sintoma:** a suíte WPF encerrava com `InvalidOperationException: Este Visual não está conectado a um PresentationSource`, em `GetResizeWorkArea`, durante a atualização de layout de uma janela desconectada.

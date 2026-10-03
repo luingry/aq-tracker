@@ -12,7 +12,8 @@ public sealed class SettingsStore
 
     public SettingsStore(string? path = null)
     {
-        _path = path ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "AqTracker", "settings.json");
+        _path = path ?? Path.Combine(UserFolders.ApplicationData, "AqTracker", "settings.json");
+        if (path is null) SanitizedLogger.Write("Settings path: " + _path);
     }
 
     public AppSettings Load()
@@ -28,6 +29,20 @@ public sealed class SettingsStore
         if (primaryExists || backupExists)
             throw new InvalidDataException("Settings and backup are invalid; existing user data was preserved.");
         return Normalize(new());
+    }
+
+    public async Task<AppSettings> LoadWhenAvailableAsync(Func<Task>? retryDelay = null)
+    {
+        for (var attempt = 0; ; attempt++)
+        {
+            try { return Load(); }
+            catch (Exception error) when (attempt < 9 &&
+                (error is IOException && error is not InvalidDataException || error is UnauthorizedAccessException))
+            {
+                SanitizedLogger.Write("Settings temporarily unavailable at startup; retry=" + (attempt + 1) + "; error=" + error.GetType().Name);
+                await (retryDelay?.Invoke() ?? Task.Delay(1000));
+            }
+        }
     }
 
     private static AppSettings? Read(string path, out bool exists)

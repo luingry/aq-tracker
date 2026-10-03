@@ -8,7 +8,7 @@ public partial class App : System.Windows.Application
     private Mutex? _singleInstanceMutex;
     private EventWaitHandle? _shutdownEvent;
 
-    protected override void OnStartup(System.Windows.StartupEventArgs e)
+    protected override async void OnStartup(System.Windows.StartupEventArgs e)
     {
         if (!_launchMainWindow) { base.OnStartup(e); return; }
         var mutexName = GetSingleInstanceMutexName();
@@ -37,11 +37,25 @@ public partial class App : System.Windows.Application
         });
 
         base.OnStartup(e);
+        AqTracker.Core.SanitizedLogger.Write("Application startup: " + typeof(App).Assembly.GetName().Version + "; startup=" + e.Args.Contains("--startup", StringComparer.OrdinalIgnoreCase));
         AqTracker.Core.LegacyDataMigration.MigrateRoamingData();
-        var window = new MainWindow(e.Args.Contains("--demo", StringComparer.OrdinalIgnoreCase),
-            startMinimized: e.Args.Contains("--startup", StringComparer.OrdinalIgnoreCase));
+        var store = new SettingsStore();
+        AppSettings settings;
+        try { settings = await store.LoadWhenAvailableAsync(); }
+        catch (Exception error) when (error is System.IO.IOException or System.IO.InvalidDataException or UnauthorizedAccessException)
+        {
+            if (_singleInstanceMutex is null) return;
+            AqTracker.Core.SanitizedLogger.Write("Startup stopped to preserve settings: " + error.GetType().Name);
+            System.Windows.MessageBox.Show("Não foi possível ler as preferências do Agent Quota Tracker. Os dados foram preservados. Tente abrir o aplicativo novamente.",
+                "Agent Quota Tracker", System.Windows.MessageBoxButton.OK, System.Windows.MessageBoxImage.Warning);
+            Shutdown();
+            return;
+        }
+        if (_singleInstanceMutex is null) return; // Shutdown may have arrived during the asynchronous retry.
+        var window = new MainWindow(e.Args.Contains("--demo", StringComparer.OrdinalIgnoreCase), store,
+            startMinimized: e.Args.Contains("--startup", StringComparer.OrdinalIgnoreCase), initialSettings: settings);
         MainWindow = window;
-        window.Show();
+        window.Start();
     }
 
     private static void SignalExistingInstanceShutdown(string mutexName)

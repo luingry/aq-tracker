@@ -62,7 +62,7 @@ public sealed class AgentActivityService
     public AgentActivitySnapshot ReadSnapshot(IReadOnlyDictionary<string, string>? titles = null, string? sessionsRoot = null)
     {
         var now = _now().ToUniversalTime();
-        var root = sessionsRoot ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".codex", "sessions");
+        var root = sessionsRoot ?? Path.Combine(UserFolders.UserProfile, ".codex", "sessions");
         if (!Directory.Exists(root)) return new([], []);
 
         var cutoff = now - _staleAfter;
@@ -275,7 +275,7 @@ public sealed class AgentActivityService
         if (string.IsNullOrWhiteSpace(path)) return false;
         try
         {
-            var memoriesRoot = NormalizePath(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".codex", "memories"));
+            var memoriesRoot = NormalizePath(Path.Combine(UserFolders.UserProfile, ".codex", "memories"));
             var candidate = NormalizePath(Environment.ExpandEnvironmentVariables(path));
             if (string.IsNullOrEmpty(memoriesRoot) || string.IsNullOrEmpty(candidate)) return false;
             return string.Equals(candidate, memoriesRoot, StringComparison.OrdinalIgnoreCase) ||
