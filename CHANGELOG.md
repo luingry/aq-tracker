@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.29.8] - 2026-10-04
+
+### Fixed
+
+- Shutting down or restarting Windows no longer shows the "taskkill.exe - Application Error (0xc0000142)" pop-up. The Codex app-server now runs inside a job object, so closing the Tracker ends its whole process tree without launching taskkill.exe, which cannot start while the session is ending.
+- The Codex app-server and anything it spawned are also ended when the Tracker crashes or is killed, instead of being left running in the background.
+
 ## [0.29.7] - 2026-10-04
 
 ### Fixed

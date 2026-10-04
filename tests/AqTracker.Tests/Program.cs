@@ -2312,6 +2312,52 @@ if (Directory.Exists(claudeUiRoot)) Directory.Delete(claudeUiRoot, true);
 Microsoft.Win32.Registry.CurrentUser.DeleteSubKeyTree(startupTestKey, throwOnMissingSubKey: false);
 if (claudeUiFailure is not null) throw new InvalidOperationException("Claude WPF smoke failed", claudeUiFailure);
 
+// Child process job: closing the job ends the whole tree (including a grandchild that
+// outlives its parent) without spawning taskkill.exe, which fails during Windows shutdown.
+var appServerSource = File.ReadAllText(FindRepositoryFile("src", "AqTracker.Core", "CodexAppServerClient.cs"));
+var disposeStart = appServerSource.IndexOf("public async ValueTask DisposeAsync()", StringComparison.Ordinal);
+var disposeCode = appServerSource.Substring(disposeStart, appServerSource.IndexOf("private static ChildProcessJob? TryCreateJobFor", disposeStart, StringComparison.Ordinal) - disposeStart);
+Assert(appServerSource.Contains("_job = TryCreateJobFor(_process);", StringComparison.Ordinal) &&
+       disposeCode.IndexOf("_job.Dispose()", StringComparison.Ordinal) >= 0 &&
+       disposeCode.IndexOf("_job.Dispose()", StringComparison.Ordinal) < disposeCode.IndexOf("TerminateProcessTree(_process)", StringComparison.Ordinal),
+       "app-server shutdown ends its tree through the job object and only falls back to taskkill without one");
+static Process StartHiddenCmd(string arguments) => Process.Start(new ProcessStartInfo("cmd.exe", arguments) { UseShellExecute = false, CreateNoWindow = true })!;
+static int[] ChildProcessIds(int parentId)
+{
+    using var search = new System.Management.ManagementObjectSearcher("SELECT ProcessId FROM Win32_Process WHERE ParentProcessId = " + parentId);
+    return search.Get().Cast<System.Management.ManagementObject>().Select(item => Convert.ToInt32(item["ProcessId"])).ToArray();
+}
+static bool IsAlive(int processId) { try { using var process = Process.GetProcessById(processId); return !process.HasExited; } catch (ArgumentException) { return false; } }
+static int WaitForChild(int parentId)
+{
+    var deadline = DateTime.UtcNow.AddSeconds(10);
+    while (DateTime.UtcNow < deadline) { var ids = ChildProcessIds(parentId).Where(IsAlive).ToArray(); if (ids.Length > 0) return ids[0]; Thread.Sleep(100); }
+    throw new InvalidOperationException("Test failed: child process did not start");
+}
+static bool WaitForExit(int processId) { var deadline = DateTime.UtcNow.AddSeconds(10); while (DateTime.UtcNow < deadline) { if (!IsAlive(processId)) return true; Thread.Sleep(100); } return false; }
+var taskkillBefore = new HashSet<int>(Process.GetProcessesByName("taskkill").Select(process => process.Id));
+using (var root = StartHiddenCmd("/d /c ping -n 60 127.0.0.1 >nul"))
+{
+    var job = ChildProcessJob.Create();
+    job.Assign(root);
+    var grandchild = WaitForChild(root.Id);
+    job.Dispose();
+    Assert(WaitForExit(root.Id) && WaitForExit(grandchild), "disposing the job ends the root and its descendants");
+    job.Dispose();
+}
+using (var root = StartHiddenCmd("/d /c start \"\" /b ping -n 60 127.0.0.1 >nul & ping -n 3 127.0.0.1 >nul"))
+{
+    var job = ChildProcessJob.Create();
+    job.Assign(root);
+    _ = WaitForChild(root.Id);
+    Thread.Sleep(500);
+    var descendants = ChildProcessIds(root.Id);
+    Assert(WaitForExit(root.Id) && descendants.Any(IsAlive), "the detached grandchild outlives its parent inside the job");
+    job.Dispose();
+    Assert(descendants.All(WaitForExit), "disposing the job ends descendants whose parent already exited");
+}
+Assert(!Process.GetProcessesByName("taskkill").Any(process => !taskkillBefore.Contains(process.Id)), "job termination never launches taskkill.exe");
+
 Console.WriteLine("All AqTracker core tests passed (including Claude engagement, sessions, OAuth, DPAPI, usage and WPF bindings).");
 
 static void Assert(bool condition, string message) { if (!condition) throw new InvalidOperationException("Test failed: " + message); }

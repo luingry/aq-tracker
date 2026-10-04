@@ -1,5 +1,12 @@
 # Erros e solucoes conhecidas
 
+## Pop-up "taskkill.exe - Erro de aplicativo (0xc0000142)" ao desligar/reiniciar o Windows
+
+- **Sintoma:** as vezes, ao desligar ou reiniciar, aparecia o pop-up `taskkill.exe - O aplicativo nao pode ser inicializado corretamente (0xc0000142)`. No log System: evento 26 (Application Popup) no mesmo segundo do evento 1074 de desligamento.
+- **Causa:** no fim da sessao o Windows fecha a janela, `OnClosing` chama `CodexAppServerClient.DisposeAsync` e `TerminateProcessTree` iniciava `taskkill.exe /T /F` para encerrar o `codex.exe app-server`. Processo novo criado com a sessao terminando falha na inicializacao (0xc0000142). Era intermitente porque so acontecia quando o `codex.exe` ainda nao tinha sido encerrado pelo proprio desligamento (`HasExited` falso).
+- **Solucao (0.29.8):** `ChildProcessJob` (Core) coloca o app-server em um Job Object com `KILL_ON_JOB_CLOSE` (+ `BREAKAWAY_OK` para nao quebrar `CREATE_BREAKAWAY_FROM_JOB` do filho). Ao fechar, `TerminateJobObject` encerra a arvore inteira sem criar processo; se o Tracker morrer/crashar o kernel faz o mesmo. `taskkill` ficou so como fallback quando o job nao pode ser criado/atribuido (logado).
+- **Prevencao:** nunca iniciar processos (taskkill, cmd, powershell) em caminhos de encerramento/`OnClosing`/`SessionEnding`; use Job Object ou APIs diretas (`TerminateJobObject`, `Process.Kill`).
+
 ## Indicador de 5h preso no ultimo percentual com "reiniciando agora"
 
 - **Sintoma:** o gauge de 5h ficava parado num valor antigo (ex.: 98%) e o tooltip/detalhe dizia "reiniciando agora" indefinidamente.

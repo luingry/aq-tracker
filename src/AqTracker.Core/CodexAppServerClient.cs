@@ -11,6 +11,7 @@ public sealed class CodexAppServerClient : IAsyncDisposable
     private readonly SemaphoreSlim _writeLock = new(1, 1);
     private readonly Dictionary<long, TaskCompletionSource<JsonElement>> _pending = [];
     private Process? _process;
+    private ChildProcessJob? _job;
     private CancellationTokenSource? _lifetime;
     private long _nextId;
     private int _terminated;
@@ -28,6 +29,8 @@ public sealed class CodexAppServerClient : IAsyncDisposable
         _process.EnableRaisingEvents = true;
         _process.Exited += (_, _) => TerminatePending(new InvalidOperationException("Codex app-server exited."));
         _process.Start();
+        _job?.Dispose();
+        _job = TryCreateJobFor(_process);
         _ = Task.Run(() => ReadLoopAsync(_lifetime.Token));
         _ = Task.Run(() => DrainErrorAsync(_lifetime.Token));
         StatusChanged?.Invoke("Connecting to Codex");
@@ -134,8 +137,27 @@ public sealed class CodexAppServerClient : IAsyncDisposable
     {
         if (_lifetime is not null) _lifetime.Cancel();
         TerminatePending(new OperationCanceledException("Agent Quota Tracker is closing."));
-        if (_process is { HasExited: false }) TerminateProcessTree(_process);
+        // The job also ends descendants that outlived an already-exited app-server.
+        if (_job is not null) _job.Dispose();
+        else if (_process is { HasExited: false }) TerminateProcessTree(_process);
         _process?.Dispose(); _lifetime?.Dispose(); _writeLock.Dispose();
+    }
+
+    private static ChildProcessJob? TryCreateJobFor(Process process)
+    {
+        ChildProcessJob? job = null;
+        try
+        {
+            job = ChildProcessJob.Create();
+            job.Assign(process);
+            return job;
+        }
+        catch (Exception ex)
+        {
+            job?.Dispose();
+            SanitizedLogger.Write("Codex app-server job object unavailable, taskkill fallback on close: " + ex.GetType().Name + " (0x" + ex.HResult.ToString("X8") + ")");
+            return null;
+        }
     }
 
     private static async Task<string?> ReadLineAsync(StreamReader reader, CancellationToken cancellationToken)
@@ -146,6 +168,7 @@ public sealed class CodexAppServerClient : IAsyncDisposable
         return await read;
     }
 
+    // Fallback only when the job object could not be created or assigned.
     // Process.Kill(entireProcessTree: true) is unavailable on .NET Framework.
     // taskkill is part of supported Windows and retains the former tree-termination contract.
     private static void TerminateProcessTree(Process process)
