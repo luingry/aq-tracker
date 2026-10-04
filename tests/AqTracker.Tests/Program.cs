@@ -159,6 +159,50 @@ var delayed30 = new RateLimitSnapshot([new("codex:primary", "Weekly", 30, null, 
 vmQuota.ApplyQuota(live70); vmQuota.Apply(delayed30, new UsageAnalytics(0, 0, 0, 0, 0, [], QuotaTimeline: [new TimedQuotaUsage(vmQuotaNow.AddDays(-1), 20)]));
 Assert(vmQuota.DailyQuotaSeries.Single(x => x.Day.Day == 12).UsedPercent == 70 && vmQuota.DailyQuotaSeries.Single(x => x.Day.Day == 11).UsedPercent == 20, "daily quota retains historical load and never regresses today when delayed analytics apply");
 File.Delete(vmQuotaPath);
+var expiryClock = new DateTimeOffset(2026, 10, 4, 10, 0, 0, TimeSpan.FromHours(-3));
+var expiryFive = new QuotaWindow("codex:primary", "5-hour limit", 2, expiryClock.AddMinutes(-1), 300);
+var expiryWeek = new QuotaWindow("codex:secondary", "Weekly limit", 40, expiryClock.AddDays(2), 10080);
+Assert(!QuotaWindowExpiry.IsExpired(expiryFive, expiryClock) && QuotaWindowExpiry.IsExpired(expiryFive, expiryClock.Add(QuotaWindowExpiry.Grace)), "a window is expired only after the grace period that lets the next poll deliver the new cycle");
+Assert(!QuotaWindowExpiry.IsExpired(expiryFive with { ResetsAt = null }, expiryClock.AddDays(9)) && !QuotaWindowExpiry.IsExpired(expiryFive with { HasUsage = false }, expiryClock.AddDays(9)), "windows without a reset time or without usage are never treated as expired");
+var expiredFive = QuotaWindowExpiry.Normalize(expiryFive, expiryClock.AddHours(1))!;
+Assert(expiredFive.Expired && !expiredFive.HasUsage && QuotaPresentation.FormatWeeklyRemaining(expiredFive) == "--" && expiredFive.ResetsAt is null, "an expired window is presented as unknown, never as a fabricated 100% or its stale value");
+Assert(ReferenceEquals(QuotaWindowExpiry.Normalize(expiryWeek, expiryClock), expiryWeek), "live windows are returned untouched");
+Assert(ResetCountdown.Format(expiredFive, expiryClock, "pt-BR") == "reiniciado, aguardando dados" && ResetCountdown.Format(expiredFive, expiryClock, "en-US") == "reset done, awaiting data", "expired windows replace the endless 'resetting now' text");
+Assert(ResetCountdown.Format(expiryFive, expiryClock, "pt-BR") == "reiniciando agora", "a window inside the grace period still reads as resetting");
+var expiryNow = expiryClock;
+var expiryViewModel = new MainViewModel(new QuotaSnapshotStore(persistent: false), () => expiryNow);
+var staleFiveHour = new QuotaWindow("codex:primary", "5-hour limit", 98, expiryClock.AddMinutes(-1), 300);
+expiryViewModel.ApplyQuota(new RateLimitSnapshot([staleFiveHour, expiryWeek with { Id = "codex:secondary" }], null, null, null, expiryClock));
+Assert(expiryViewModel.FiveHour == "2%" && expiryViewModel.FiveHourReset == "reiniciando agora", "inside the grace period the last reported five-hour value is kept");
+expiryNow = expiryClock.AddMinutes(10);
+expiryViewModel.ReevaluateQuotaExpiry();
+Assert(expiryViewModel.FiveHour == "--" && expiryViewModel.FiveHourRemainingPercent == 0 && expiryViewModel.FiveHourReset == "reiniciado, aguardando dados" && expiryViewModel.Weekly == "60%", "without a fresh snapshot the periodic check shows the expired five-hour cycle as unknown and leaves the weekly cycle alone");
+expiryViewModel.ApplyQuota(new RateLimitSnapshot([staleFiveHour with { UsedPercent = 7, ResetsAt = expiryNow.AddHours(5) }, expiryWeek], null, null, null, expiryNow));
+Assert(expiryViewModel.FiveHour == "93%" && expiryViewModel.FiveHourReset.StartsWith("reinicia em 5h", StringComparison.Ordinal), "a fresh snapshot with the new cycle replaces the reset presentation");
+var expiryClaude = new MainViewModel(new QuotaSnapshotStore(persistent: false), () => expiryNow);
+expiryClaude.ApplyClaude(new RateLimitSnapshot([new("claude:five_hour", "5h", 98, expiryClock, 300), new("claude:seven_day", "7d", 10, expiryNow.AddDays(1), 10080)], null, null, null, expiryClock), ClaudeConnectionState.Connected, true);
+Assert(expiryClaude.ClaudeFiveHour == "--" && expiryClaude.ClaudeFiveHourReset == "reiniciado, aguardando dados" && expiryClaude.ClaudeWeekly == "90%", "a stale Claude snapshot whose five-hour cycle ended is shown as unknown, not as a made-up value");
+Assert(expiryClaude.CompactQuotas.Any() && expiryClaude.NotificationQuotas.All(row => row.Percent != "100%"), "expired windows never surface a made-up percentage in the gauges or the tray");
+var unreadableStore = new TestClaudeTokenStore(new("a", "r", expiryClock.AddHours(1))) { Unreadable = true };
+var unreadableNow = expiryClock;
+using (var unreadableClient = new ClaudeUsageClient(unreadableStore, Path.Combine(Path.GetTempPath(), "aq-unreadable-" + Guid.NewGuid() + ".json"), "0.29.7",
+    new TestHttpHandler((_, _) => Task.FromResult(new HttpResponseMessage(HttpStatusCode.InternalServerError))), () => unreadableNow))
+{
+    Assert(unreadableClient.State == ClaudeConnectionState.Disconnected, "credentials that cannot be read at startup start out disconnected");
+    for (var attempt = 0; attempt < 2; attempt++) { await unreadableClient.RefreshAsync(CancellationToken.None); unreadableNow = unreadableNow.AddSeconds(61); }
+    Assert(unreadableClient.State == ClaudeConnectionState.Disconnected, "a couple of unreadable loads are still treated as transient");
+    await unreadableClient.RefreshAsync(CancellationToken.None);
+    Assert(unreadableClient.State == ClaudeConnectionState.Reconnect && unreadableClient.IsStale, "credentials present on disk that keep failing to load surface as reconnect required instead of a silent stale snapshot");
+    unreadableStore.Unreadable = false; unreadableNow = unreadableNow.AddSeconds(61);
+    await unreadableClient.RefreshAsync(CancellationToken.None);
+    Assert(unreadableClient.State == ClaudeConnectionState.Connected, "readable credentials recover from the unreadable state without another sign-in");
+}
+var absentStore = new TestClaudeTokenStore();
+using (var absentClient = new ClaudeUsageClient(absentStore, Path.Combine(Path.GetTempPath(), "aq-absent-" + Guid.NewGuid() + ".json"), "0.29.7", new TestHttpHandler((_, _) => Task.FromResult(new HttpResponseMessage(HttpStatusCode.InternalServerError))), () => unreadableNow))
+{
+    for (var attempt = 0; attempt < 5; attempt++) { await absentClient.RefreshAsync(CancellationToken.None); unreadableNow = unreadableNow.AddSeconds(61); }
+    Assert(absentClient.State == ClaudeConnectionState.Disconnected, "a genuinely signed-out account never asks to reconnect");
+}
 Assert(mainWindowSource.Contains("_startupAnalytics.BeginConnection();", StringComparison.Ordinal) && mainWindowSource.Contains("_startupAnalytics.IsCurrent(connectionGeneration)", StringComparison.Ordinal), "new app-server clients invalidate previous callbacks before asynchronous discovery and recheck generation on the dispatcher");
 
 var trayOnlyExtendedStyle = TrayOnlyWindowPolicy.ToTrayOnlyExtendedStyle(TrayOnlyWindowPolicy.AppWindowExtendedStyle | 0x00000008L);
@@ -1461,8 +1505,11 @@ Assert(LocalizationManager.HasTextKey("CheckForUpdates") && LocalizationManager.
 
 // Claude profile: deterministic engagement and permitted-window selection matrix.
 var claudeTestNow = new DateTimeOffset(2026, 10, 1, 12, 0, 0, TimeSpan.Zero);
-IReadOnlyList<QuotaWindow> profileCodexWindows = [new("codex:primary", "5h", 20, claudeTestNow.AddHours(2), 300), new("codex:secondary", "7d", 80, claudeTestNow.AddDays(2), 10080)];
-IReadOnlyList<QuotaWindow> profileClaudeWindows = [new("claude:five_hour", "5h", 70, claudeTestNow.AddHours(1), 300), new("claude:seven_day", "7d", 40, claudeTestNow.AddDays(3), 10080)];
+// Quota resets are anchored to the real clock: the WPF smoke has no injected clock, and a cycle whose reset
+// already passed is (correctly) presented as reset rather than with its stale percentage.
+var profileQuotaAnchor = DateTimeOffset.UtcNow;
+IReadOnlyList<QuotaWindow> profileCodexWindows = [new("codex:primary", "5h", 20, profileQuotaAnchor.AddHours(2), 300), new("codex:secondary", "7d", 80, profileQuotaAnchor.AddDays(2), 10080)];
+IReadOnlyList<QuotaWindow> profileClaudeWindows = [new("claude:five_hour", "5h", 70, profileQuotaAnchor.AddHours(1), 300), new("claude:seven_day", "7d", 40, profileQuotaAnchor.AddDays(3), 10080)];
 var profileStates = Enumerable.Range(0, 16).Select(bits => new ProfileActivity((bits & 1) != 0, (bits & 2) != 0, (bits & 4) != 0, (bits & 8) != 0)).ToArray();
 foreach (var codexProfile in profileStates)
 foreach (var claudeProfile in profileStates)
@@ -2305,9 +2352,11 @@ static void CopyFileSnapshot(string sourcePath, string destinationPath)
 sealed class TestClaudeTokenStore(ClaudeTokens? initial = null) : IClaudeTokenStore
 {
     private ClaudeTokens? _tokens = initial;
-    public ClaudeTokens? Load() => _tokens;
+    public bool Unreadable { get; set; }
+    public ClaudeTokens? Load() => Unreadable ? null : _tokens;
     public void Save(ClaudeTokens tokens) => _tokens = tokens;
     public void Delete() => _tokens = null;
+    public bool HasStoredCredentials() => _tokens is not null;
 }
 sealed class TestHttpHandler(Func<HttpRequestMessage, int, Task<HttpResponseMessage>> respond) : HttpMessageHandler
 {

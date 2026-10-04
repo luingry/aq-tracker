@@ -415,9 +415,7 @@ public sealed partial class MainViewModel : INotifyPropertyChanged
         _lastWeekly = weekly;
         _hasQuotaSnapshot = true;
         UpdateActiveQuotaCycle(weekly);
-        Weekly = QuotaPresentation.FormatWeeklyRemaining(weekly);
-        RemainingPercent = weekly?.RemainingPercent ?? 0;
-        Reset = weekly is null ? LocalizationManager.Text("QuotaNotReported") : ResetCountdown.Format(weekly.ResetsAt, DateTimeOffset.Now, LocalizationManager.CurrentLanguageCode);
+        ApplyWeeklyDisplay(weekly);
         ApplyForecast(WeeklyForecastCalculator.Calculate(weekly, snapshot.ReceivedAt));
         RefreshDailyQuotaSeries(weekly, snapshot.ReceivedAt);
         Status = weekly is null ? LocalizationManager.Text("NoLiveData") : LocalizationManager.Text("LiveData");
@@ -437,9 +435,7 @@ public sealed partial class MainViewModel : INotifyPropertyChanged
         _lastWeekly = weekly;
         _hasQuotaSnapshot = true;
         UpdateActiveQuotaCycle(weekly);
-        Weekly = QuotaPresentation.FormatWeeklyRemaining(weekly);
-        RemainingPercent = weekly?.RemainingPercent ?? 0;
-        Reset = weekly is null ? LocalizationManager.Text("QuotaNotReported") : ResetCountdown.Format(weekly.ResetsAt, DateTimeOffset.Now, LocalizationManager.CurrentLanguageCode);
+        ApplyWeeklyDisplay(weekly);
         Today = TokenPresentation.Format(analytics.TodayTokens, LocalizationManager.CurrentLanguageCode); Month = TokenPresentation.Format(analytics.MonthTokens, LocalizationManager.CurrentLanguageCode);
         DailyTokenSeries = analytics.DailySeries ?? [];
         PropertyChanged?.Invoke(this, new(nameof(DailyTokenSeries)));
@@ -459,15 +455,25 @@ public sealed partial class MainViewModel : INotifyPropertyChanged
         Status = weekly is null ? LocalizationManager.Text("NoLiveData") : LocalizationManager.Text("LiveData");
     }
 
+    // Shows the weekly window as the user should see it now: a cycle that ended without fresh data
+    // is displayed as reset. The raw window stays in _lastWeekly for history and forecasting.
+    private void ApplyWeeklyDisplay(QuotaWindow? rawWeekly)
+    {
+        var weekly = QuotaWindowExpiry.Normalize(rawWeekly, _clock());
+        Weekly = QuotaPresentation.FormatWeeklyRemaining(weekly);
+        RemainingPercent = weekly?.RemainingPercent ?? 0;
+        Reset = weekly is null ? LocalizationManager.Text("QuotaNotReported") : ResetCountdown.Format(weekly, _clock(), LocalizationManager.CurrentLanguageCode);
+    }
+
     private void ApplyCompactQuotaWindows(IEnumerable<QuotaWindow> windows)
     {
-        _codexWindows = windows.ToArray();
+        _codexSnapshot = windows.ToArray();
         RefreshProfilePresentation();
-        var fiveHour = OfficialCodexQuotaWindows.FiveHours(windows);
+        var fiveHour = OfficialCodexQuotaWindows.FiveHours(CodexWindows);
         HasFiveHourQuota = fiveHour is not null;
         FiveHour = QuotaPresentation.FormatWeeklyRemaining(fiveHour);
         FiveHourRemainingPercent = fiveHour?.RemainingPercent ?? 0;
-        FiveHourReset = fiveHour is null ? "" : ResetCountdown.Format(fiveHour.ResetsAt, DateTimeOffset.Now, LocalizationManager.CurrentLanguageCode);
+        FiveHourReset = fiveHour is null ? "" : ResetCountdown.Format(fiveHour, _clock(), LocalizationManager.CurrentLanguageCode);
         PropertyChanged?.Invoke(this, new(nameof(ShowCompactFiveHour)));
         PropertyChanged?.Invoke(this, new(nameof(ShowCompactWeekly)));
         PropertyChanged?.Invoke(this, new(nameof(CompactQuotaCount)));
@@ -611,7 +617,7 @@ public sealed partial class MainViewModel : INotifyPropertyChanged
     public void RefreshLocalization()
     {
         if (_hasQuotaSnapshot)
-            Reset = _lastWeekly is null ? LocalizationManager.Text("QuotaNotReported") : ResetCountdown.Format(_lastWeekly.ResetsAt, DateTimeOffset.Now, LocalizationManager.CurrentLanguageCode);
+            ApplyWeeklyDisplay(_lastWeekly);
         else
             Reset = LocalizationManager.Text("LoadingWeeklyQuota");
         if (_lastAnalytics is { } analytics)

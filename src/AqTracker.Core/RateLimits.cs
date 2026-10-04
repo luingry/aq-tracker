@@ -5,7 +5,7 @@ namespace AqTracker.Core;
 
 public enum ConnectionState { Loading, Live, Stale, SignedOut, Error }
 
-public sealed record QuotaWindow(string Id, string Label, double UsedPercent, DateTimeOffset? ResetsAt, int? WindowDurationMins, string? Detail = null, bool HasUsage = true)
+public sealed record QuotaWindow(string Id, string Label, double UsedPercent, DateTimeOffset? ResetsAt, int? WindowDurationMins, string? Detail = null, bool HasUsage = true, bool Expired = false)
 {
     public double RemainingPercent => HasUsage ? Net48Compatibility.Clamp(100 - UsedPercent, 0, 100) : 0;
 }

@@ -11,7 +11,13 @@ public sealed record CompactQuotaRow(string Label, string Percent, double Remain
 
 public sealed partial class MainViewModel
 {
-    private IReadOnlyList<QuotaWindow> _codexWindows = [], _claudeWindows = [];
+    // Raw provider snapshots; presentation always goes through CodexWindows/ClaudeWindows so cycles
+    // that ended without fresh data are shown as reset instead of keeping their old percentage.
+    private IReadOnlyList<QuotaWindow> _codexSnapshot = [], _claudeSnapshot = [];
+    private int _expiredQuotaCount;
+    private DateTimeOffset? _claudeReceivedAt;
+    private IReadOnlyList<QuotaWindow> CodexWindows => QuotaWindowExpiry.Normalize(_codexSnapshot, _clock());
+    private IReadOnlyList<QuotaWindow> ClaudeWindows => QuotaWindowExpiry.Normalize(_claudeSnapshot, _clock());
     private IReadOnlyList<ProfileGauge> _profileGauges = [new(AgentProvider.Codex, "7d", null)];
     private ProfileActivity _codexActivity, _claudeActivity;
     private AgentProvider _lastProfile = AgentProvider.Codex;
@@ -36,7 +42,7 @@ public sealed partial class MainViewModel
                 {
                     if (_compactQuotaDisplay != "both" && _compactQuotaDisplay != period) continue;
                     var quota = ProfileEngagementPolicy.Find(provider,
-                        provider == AgentProvider.Codex ? _codexWindows : _claudeWindows, period);
+                        provider == AgentProvider.Codex ? CodexWindows : ClaudeWindows, period);
                     if (quota is null || !quota.HasUsage) continue;
                     var gauge = new ProfileGauge(provider, period, quota);
                     rows.Add(new(period, QuotaPresentation.FormatWeeklyRemaining(quota), quota.RemainingPercent,
@@ -99,10 +105,10 @@ public sealed partial class MainViewModel
     }
     public string ClaudeDetailStatus => _claudeState != ClaudeConnectionState.Connected ? LocalizationManager.Text("ClaudeConnectSettings") :
         LocalizationManager.Text(_claudeStale ? "ClaudeStale" : "ClaudeConnected");
-    public string ClaudeFiveHour => QuotaPresentation.FormatWeeklyRemaining(ProfileEngagementPolicy.Find(AgentProvider.Claude, _claudeWindows, "5h"));
-    public string ClaudeWeekly => QuotaPresentation.FormatWeeklyRemaining(ProfileEngagementPolicy.Find(AgentProvider.Claude, _claudeWindows, "7d"));
-    public double ClaudeFiveHourRemainingPercent => ProfileEngagementPolicy.Find(AgentProvider.Claude, _claudeWindows, "5h")?.RemainingPercent ?? 0;
-    public double ClaudeWeeklyRemainingPercent => ProfileEngagementPolicy.Find(AgentProvider.Claude, _claudeWindows, "7d")?.RemainingPercent ?? 0;
+    public string ClaudeFiveHour => QuotaPresentation.FormatWeeklyRemaining(ProfileEngagementPolicy.Find(AgentProvider.Claude, ClaudeWindows, "5h"));
+    public string ClaudeWeekly => QuotaPresentation.FormatWeeklyRemaining(ProfileEngagementPolicy.Find(AgentProvider.Claude, ClaudeWindows, "7d"));
+    public double ClaudeFiveHourRemainingPercent => ProfileEngagementPolicy.Find(AgentProvider.Claude, ClaudeWindows, "5h")?.RemainingPercent ?? 0;
+    public double ClaudeWeeklyRemainingPercent => ProfileEngagementPolicy.Find(AgentProvider.Claude, ClaudeWindows, "7d")?.RemainingPercent ?? 0;
     public string ClaudeFiveHourReset => ClaudeReset("5h");
     public string ClaudeWeeklyReset => ClaudeReset("7d");
     public string ClaudeFiveHourAccessibleName => LocalizationManager.Format("ProfileQuotaIndicator", AgentProvider.Claude, "5h");
@@ -123,7 +129,8 @@ public sealed partial class MainViewModel
     }
     public void ApplyClaude(RateLimitSnapshot? snapshot, ClaudeConnectionState state, bool stale)
     {
-        _claudeWindows = snapshot?.Windows ?? [];
+        _claudeSnapshot = snapshot?.Windows ?? [];
+        _claudeReceivedAt = snapshot?.ReceivedAt;
         _claudeState = state; _claudeStale = stale;
         RefreshProfilePresentation();
     }
@@ -137,13 +144,38 @@ public sealed partial class MainViewModel
     private bool ProfileWorking(AgentProvider provider) => (provider == AgentProvider.Claude ? _claudeActivity : _codexActivity).HasActiveWork && System.Windows.SystemParameters.ClientAreaAnimation;
     private string GaugeTooltip(ProfileGauge gauge) => LocalizationManager.Format("ProfileQuotaIndicator", gauge.Provider, gauge.Window) +
         " · " + QuotaPresentation.FormatWeeklyRemaining(gauge.Quota) + "\n" +
-        (gauge.Provider == AgentProvider.Claude ? ClaudeDetailStatus + "\n" : "") +
-        ResetCountdown.Format(gauge.Quota?.ResetsAt, _clock(), LocalizationManager.CurrentLanguageCode);
-    private string ClaudeReset(string window) => ResetCountdown.Format(ProfileEngagementPolicy.Find(AgentProvider.Claude, _claudeWindows, window)?.ResetsAt, _clock(), LocalizationManager.CurrentLanguageCode);
+        (gauge.Provider == AgentProvider.Claude ? ClaudeDetailStatus + "\n" + ClaudeDataAge() : "") +
+        ResetCountdown.Format(gauge.Quota, _clock(), LocalizationManager.CurrentLanguageCode);
+    // A snapshot that is no longer being refreshed must say how old it is instead of passing as current.
+    private string ClaudeDataAge()
+    {
+        if (_claudeReceivedAt is not { } received || !_claudeStale && _claudeState == ClaudeConnectionState.Connected) return "";
+        var local = received.ToLocalTime();
+        var when = _clock().ToLocalTime().Date == local.Date ? local.ToString("HH:mm") : local.ToString("dd/MM HH:mm");
+        return LocalizationManager.Format("QuotaDataAsOf", when) + "\n";
+    }
+    private string ClaudeReset(string window) => ResetCountdown.Format(ProfileEngagementPolicy.Find(AgentProvider.Claude, ClaudeWindows, window), _clock(), LocalizationManager.CurrentLanguageCode);
     private void RefreshProfilePresentation()
     {
-        _profileGauges = ProfileEngagementPolicy.Select(_codexActivity, _claudeActivity, _lastProfile, _compactQuotaDisplay, _codexWindows, _claudeWindows);
+        _profileGauges = ProfileEngagementPolicy.Select(_codexActivity, _claudeActivity, _lastProfile, _compactQuotaDisplay, CodexWindows, ClaudeWindows);
+        _expiredQuotaCount = CountExpiredQuotas();
         NotifyProfileProperties();
+    }
+    private int CountExpiredQuotas()
+    {
+        var now = _clock();
+        return QuotaWindowExpiry.CountExpired(_codexSnapshot, now) + QuotaWindowExpiry.CountExpired(_claudeSnapshot, now);
+    }
+
+    /// <summary>
+    /// Called periodically: a cycle can end between snapshots (or while a provider is unreachable), so the
+    /// gauges are re-evaluated against the clock. Does nothing unless a window has newly expired.
+    /// </summary>
+    public void ReevaluateQuotaExpiry()
+    {
+        if (CountExpiredQuotas() == _expiredQuotaCount) return;
+        ApplyCompactQuotaWindows(_codexSnapshot);
+        if (_hasQuotaSnapshot) ApplyWeeklyDisplay(_lastWeekly);
     }
     private void NotifyProfileProperties()
     {

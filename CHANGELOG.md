@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.29.7] - 2026-10-04
+
+### Fixed
+
+- A quota cycle that has ended with no fresh data is no longer shown as a made-up 100%: the gauge reads "--" with "reiniciado, aguardando dados" until the provider reports the new cycle.
+- Claude credentials that exist on disk but keep failing to decrypt (three consecutive attempts) now switch the account to "Reconexão necessária" instead of silently displaying a snapshot that gets older every hour. The file is left untouched and keeps being retried, so a later successful read returns to Connected without signing in again.
+- The Claude gauge tooltip states when its data is from (`Dados de HH:mm`) whenever the snapshot is out of date or the account is not connected.
+- Credential load failures now log the error code (HRESULT), which identifies why Windows refused to decrypt them.
+
+## [0.29.6] - 2026-10-04
+
+### Fixed
+
+- A quota window whose reset time has passed no longer stays stuck on its old percentage with "reiniciando agora" indefinitely. When no fresh data replaces the finished cycle within two minutes (provider unreachable, backoff, server still reporting the old cycle), the Codex and Claude 5h/7d gauges show it as fully reset ("reiniciado") until the next snapshot brings the new cycle.
+- The gauges re-evaluate expiry on every refresh tick, so a cycle ending between snapshots is reflected without waiting for new provider data.
+
 ## [0.29.5] - 2026-10-03
 
 ### Fixed

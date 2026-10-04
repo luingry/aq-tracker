@@ -10,6 +10,8 @@ public interface IClaudeTokenStore
     ClaudeTokens? Load();
     void Save(ClaudeTokens tokens);
     void Delete();
+    /// <summary>True when credentials exist on disk, even if they cannot currently be read.</summary>
+    bool HasStoredCredentials();
 }
 
 public sealed class ClaudeTokenStore : IClaudeTokenStore
@@ -31,9 +33,15 @@ public sealed class ClaudeTokenStore : IClaudeTokenStore
         }
         catch (Exception error) when (error is IOException or UnauthorizedAccessException or CryptographicException or JsonException)
         {
-            SanitizedLogger.Write("Claude token load failed: " + error.GetType().Name);
+            // The HRESULT identifies why DPAPI refused (wrong user/logon context, key not available...); it carries no secret.
+            SanitizedLogger.Write("Claude token load failed: " + error.GetType().Name + " (0x" + error.HResult.ToString("X8") + ")");
             return null;
         }
+    }
+    public bool HasStoredCredentials()
+    {
+        try { return File.Exists(_path); }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException) { return false; }
     }
     public void Save(ClaudeTokens tokens)
     {

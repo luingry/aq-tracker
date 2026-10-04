@@ -4,6 +4,10 @@ public static class ResetCountdown
 {
     public static string Format(DateTimeOffset? resetsAt, DateTimeOffset now) => Format(resetsAt, now, "pt-BR");
 
+    public static string Format(QuotaWindow? window, DateTimeOffset now, string? languageCode) => window?.Expired == true
+        ? string.Equals(languageCode?.Trim(), "en-US", StringComparison.OrdinalIgnoreCase) ? "reset done, awaiting data" : "reiniciado, aguardando dados"
+        : Format(window?.ResetsAt, now, languageCode);
+
     public static string Format(DateTimeOffset? resetsAt, DateTimeOffset now, string? languageCode)
     {
         var isEnglish = string.Equals(languageCode?.Trim(), "en-US", StringComparison.OrdinalIgnoreCase);

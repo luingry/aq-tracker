@@ -45,7 +45,9 @@ public sealed class ClaudeUsageClient : IDisposable
     private readonly Func<DateTimeOffset> _clock;
     private readonly SemaphoreSlim _gate = new(1, 1);
     private ClaudeTokens? _tokens;
-    private int _failures;
+    private const int UnreadableLoadsBeforeReconnect = 3;
+    private int _failures, _unreadableLoads;
+    private bool _credentialsUnreadable;
     private DateTimeOffset _nextAttempt;
     public ClaudeConnectionState State { get; private set; }
     public RateLimitSnapshot? Snapshot { get; private set; }
@@ -76,7 +78,7 @@ public sealed class ClaudeUsageClient : IDisposable
             _store.Save(tokens);
             _tokens = tokens;
             State = ClaudeConnectionState.Connected;
-            _nextAttempt = default; _failures = 0;
+            _nextAttempt = default; _failures = 0; _unreadableLoads = 0; _credentialsUnreadable = false;
         }
         finally { _gate.Release(); }
     }
@@ -88,6 +90,7 @@ public sealed class ClaudeUsageClient : IDisposable
         {
             _store.Delete();
             _tokens = null; Snapshot = null; IsStale = true;
+            _unreadableLoads = 0; _credentialsUnreadable = false;
             State = ClaudeConnectionState.Disconnected;
             if (File.Exists(_snapshotPath)) File.Delete(_snapshotPath);
         }
@@ -102,10 +105,16 @@ public sealed class ClaudeUsageClient : IDisposable
             if (_clock() < _nextAttempt) return;
             // A sharing/DPAPI failure during sign-in must not permanently disconnect
             // a client whose credentials are still safely persisted on disk.
-            if (_tokens is null && State == ClaudeConnectionState.Disconnected)
+            if (_tokens is null && (State == ClaudeConnectionState.Disconnected || _credentialsUnreadable))
             {
                 _tokens = _store.Load();
-                if (_tokens is null) { _nextAttempt = _clock().AddSeconds(60); return; }
+                if (_tokens is null)
+                {
+                    NoteUnreadableCredentials();
+                    _nextAttempt = _clock().AddSeconds(60);
+                    return;
+                }
+                _unreadableLoads = 0; _credentialsUnreadable = false;
                 State = ClaudeConnectionState.Connected;
                 SanitizedLogger.Write("Claude credentials recovered after initial load was unavailable.");
             }
@@ -182,6 +191,18 @@ public sealed class ClaudeUsageClient : IDisposable
         AtomicFile.Write(_snapshotPath, JsonSerializer.SerializeToUtf8Bytes(snapshot));
         Snapshot = snapshot; IsStale = false; State = ClaudeConnectionState.Connected;
         _failures = 0; _nextAttempt = default;
+    }
+    /// <summary>
+    /// Credentials present on disk that keep failing to load are not a transient glitch: report "reconnect required"
+    /// instead of silently showing an ever older snapshot as if the account were fine. The file is left untouched and
+    /// keeps being retried, so a later successful read returns to Connected without another sign-in.
+    /// </summary>
+    private void NoteUnreadableCredentials()
+    {
+        if (!_store.HasStoredCredentials()) { _unreadableLoads = 0; return; }
+        if (++_unreadableLoads < UnreadableLoadsBeforeReconnect || _credentialsUnreadable) return;
+        _credentialsUnreadable = true; IsStale = true; State = ClaudeConnectionState.Reconnect;
+        SanitizedLogger.Write("Claude credentials exist but cannot be read after " + _unreadableLoads + " attempts; reconnect required.");
     }
     private void Backoff() { IsStale = true; _failures = Math.Min(_failures + 1, 5); _nextAttempt = _clock().AddSeconds(Math.Min(600, 60 * Math.Pow(2, _failures - 1))); }
     private void RequireReconnect()

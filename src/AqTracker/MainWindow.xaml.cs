@@ -237,6 +237,7 @@ public partial class MainWindow : Window
     private async Task RefreshAsync()
     {
         _ = CheckForUpdatesIfDueAsync();
+        _viewModel.ReevaluateQuotaExpiry();
         _ = RefreshClaudeAsync();
         if (_client is null) { await LoadAsync(); return; }
         try
