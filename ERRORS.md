@@ -505,3 +505,10 @@
 - **Causa:** o preview reconhecia controles interativos apenas para suprimir duplo clique, mas armava o arraste nativo mesmo assim.
 - **Solucao:** retornar antes de armar movimento ou resize quando a origem pertence a um controle interativo.
 - **Prevencao:** regressao WPF envia PreviewMouseDown pelo Thumb real e verifica que o gesto nao arma o arraste da janela.
+
+## AqTracker consumia ~80 s de CPU no login e ~25% de um núcleo continuamente
+
+- **Sintoma:** logo após ligar o Windows o processo acumulava dezenas de segundos de CPU e seguia usando ~0,2 núcleo mesmo ocioso na bandeja.
+- **Causa:** o cache do `LocalUsageAnalyticsService` existia só em memória, então todo início reparseava o histórico inteiro de `~/.codex/sessions` (4 GB/1.700 rollouts ≈ 11 s de relógio e 20 s de CPU). Cada leitura periódica ainda relia os metadados (`Describe`) e o último byte de todos os arquivos. Além disso, o poll de agentes de 1 s fazia `EnumerateFiles(AllDirectories)` + `stat` de todos os rollouts (~100 ms de CPU por segundo).
+- **Solução:** cache por arquivo persistido em `%LOCALAPPDATA%\AqTracker\cache\usage-analytics.bin` (binário versionado por `PersistentCacheFormat` e pela tabela de preços; escrita atômica; qualquer erro só causa um parse frio). Descritores e a checagem de newline são reaproveitados enquanto a assinatura prova que os bytes não mudaram. O poll de agentes, no layout `yyyy\MM\dd`, lê só o conjunto quente (cache, pastas de hoje/ontem, caminhos do `FileSystemWatcher`) e faz a varredura completa a cada 10 s; raízes sem esse layout continuam varrendo tudo.
+- **Prevenção:** ao mudar `Describe`/`ParseAggregate` ou o significado de um campo cacheado, incremente `PersistentCacheFormat`. Valide com o harness que compara leitura fria sem cache vs. reinício a partir do cache (resultado precisa ser idêntico) e compare hot set vs. varredura completa por várias leituras.

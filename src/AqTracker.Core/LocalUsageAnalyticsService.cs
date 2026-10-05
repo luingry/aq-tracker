@@ -80,17 +80,32 @@ public sealed class LocalUsageAnalyticsService
     private readonly Func<DateTimeOffset> _clock;
     private readonly int _maxParseParallelism;
     private readonly string? _stateDatabasePath;
+    private readonly string? _persistentCachePath;
+    private bool _persistentCacheLoaded;
+    private bool _persistentCacheDirty;
     private ThreadModelIndex? _threadModelIndex;
     private string? _threadModelIndexPath;
     private ThreadTitleIndex? _threadTitleIndex;
     private string? _threadTitleIndexPath;
 
-    public LocalUsageAnalyticsService(Func<DateTimeOffset>? clock = null, int? maxParseParallelism = null, string? stateDatabasePath = null)
+    /// <param name="persistentCachePath">
+    /// When set, the per-file aggregates survive restarts, so a sign-in start reads only rollouts
+    /// that changed instead of re-parsing the whole history (gigabytes on long-lived installs).
+    /// </param>
+    public LocalUsageAnalyticsService(Func<DateTimeOffset>? clock = null, int? maxParseParallelism = null, string? stateDatabasePath = null, string? persistentCachePath = null)
     {
         _clock = clock ?? (() => DateTimeOffset.Now);
         _maxParseParallelism = Math.Max(1, Math.Min(2, maxParseParallelism ?? Environment.ProcessorCount));
         _stateDatabasePath = stateDatabasePath;
+        _persistentCachePath = persistentCachePath;
     }
+
+    public static string? TryGetDefaultPersistentCachePath()
+    {
+        try { return Path.Combine(UserFolders.LocalApplicationData, "AqTracker", "cache", "usage-analytics.bin"); }
+        catch (InvalidOperationException) { return null; }
+    }
+    public int FilesLoadedFromPersistentCache { get; private set; }
     public int FilesParsedLastRead { get; private set; }
     public int FilesRebuiltLastRead { get; private set; }
     public int FilesAppendedLastRead { get; private set; }
@@ -137,11 +152,12 @@ public sealed class LocalUsageAnalyticsService
             : DefaultRoots(UserFolders.UserProfile);
         var fallbackModels = ReadFallbackModels(root);
         var fallbackTitles = ReadFallbackTitles(root);
+        EnsurePersistentCacheLoaded();
         var files = roots.Where(Directory.Exists).SelectMany(path => Directory.EnumerateFiles(path, "*.jsonl", SearchOption.AllDirectories))
-            .Select(file => Describe(file)).ToArray();
+            .Select(file => DescribeCached(file)).ToArray();
         if (files.Length == 0) return new(0, 0, 0, 0, 0, []);
         var activePaths = files.Select(x => x.Path).ToHashSet(StringComparer.OrdinalIgnoreCase);
-        foreach (var stale in _cache.Keys.Where(x => !activePaths.Contains(x)).ToArray()) _cache.Remove(stale);
+        foreach (var stale in _cache.Keys.Where(x => !activePaths.Contains(x)).ToArray()) { _cache.Remove(stale); _persistentCacheDirty = true; }
         var candidateCaches = new Dictionary<string, CachedFile>(StringComparer.OrdinalIgnoreCase);
         var parsePlans = new List<ParsePlan>(files.Length);
         foreach (var file in files)
@@ -152,11 +168,13 @@ public sealed class LocalUsageAnalyticsService
                 var fallbackModel = fallbackModels.TryGetValue(file.FileId, out var indexedModel) ? indexedModel : "unknown";
                 // Active JSONL files may end mid-record. Do not advance the cache offset over an incomplete line;
                 // the next read rebuilds this file after the writer commits its terminating newline.
-                var hasCommittedTail = HasFinalNewline(file.Path, signature.Length);
+                // Only committed tails are cached, so an unchanged signature already proves the newline.
+                var hasCommittedTail = _cache.TryGetValue(file.Path, out var known) && known.Signature == signature ||
+                                       HasFinalNewline(file.Path, signature.Length);
                 if (!hasCommittedTail)
                 {
                     parsePlans.Add(new(file, signature, null, ParseKind.Partial, fallbackModel));
-                    _cache.Remove(file.Path);
+                    if (_cache.Remove(file.Path)) _persistentCacheDirty = true;
                     continue;
                 }
                 if (!_cache.TryGetValue(file.Path, out var cached) || cached.IsFork != file.IsFork || cached.FallbackModel != fallbackModel || signature.Length < cached.Signature.Length || (signature.Length == cached.Signature.Length && signature.LastWriteUtcTicks != cached.Signature.LastWriteUtcTicks) || (signature.Length > cached.Signature.Length && PrefixMarker.Create(file.Path, cached.Signature.Length) != cached.PrefixMarker))
@@ -200,18 +218,18 @@ public sealed class LocalUsageAnalyticsService
                 MergeTimeline(cached.Timeline, parsed.Timeline);
                 MergeModelTimeline(cached.ModelTimeline, parsed.ModelTimeline);
                 MergeQuotaTimeline(cached.QuotaTimeline, parsed.QuotaTimeline);
-                cached = cached with { Signature = plan.Signature, FallbackModel = plan.FallbackModel, LastTotals = parsed.LastTotals ?? cached.LastTotals, LastModel = parsed.LastModel, LastUsageAt = MostRecent(cached.LastUsageAt, parsed.LastUsageAt), PrefixMarker = PrefixMarker.Create(plan.File.Path, plan.Signature.Length) };
+                cached = cached with { Signature = plan.Signature, FallbackModel = plan.FallbackModel, LastTotals = parsed.LastTotals ?? cached.LastTotals, LastModel = parsed.LastModel, LastUsageAt = MostRecent(cached.LastUsageAt, parsed.LastUsageAt), PrefixMarker = PrefixMarker.Create(plan.File.Path, plan.Signature.Length), Descriptor = plan.File };
                 FilesAppendedLastRead++;
                 BytesReadLastRead += plan.Signature.Length - previousLength;
             }
             else
             {
-                cached = new CachedFile(plan.Signature, plan.File.IsFork, plan.FallbackModel, parsed.Buckets, parsed.Timeline, parsed.ModelTimeline, parsed.QuotaTimeline, parsed.LastTotals, parsed.LastModel, parsed.LastUsageAt, plan.Kind == ParseKind.Partial ? "" : PrefixMarker.Create(plan.File.Path, plan.Signature.Length));
+                cached = new CachedFile(plan.Signature, plan.File.IsFork, plan.FallbackModel, parsed.Buckets, parsed.Timeline, parsed.ModelTimeline, parsed.QuotaTimeline, parsed.LastTotals, parsed.LastModel, parsed.LastUsageAt, plan.Kind == ParseKind.Partial ? "" : PrefixMarker.Create(plan.File.Path, plan.Signature.Length), plan.File);
                 FilesRebuiltLastRead++;
                 BytesReadLastRead += plan.Signature.Length;
             }
             FilesParsedLastRead++;
-            if (plan.Kind != ParseKind.Partial) _cache[plan.File.Path] = cached;
+            if (plan.Kind != ParseKind.Partial) { _cache[plan.File.Path] = cached; _persistentCacheDirty = true; }
             candidateCaches[plan.File.Path] = cached;
         }
         foreach (var cached in candidateCaches.Values)
@@ -293,6 +311,7 @@ public sealed class LocalUsageAnalyticsService
             .ToArray();
         var timedSeries = timeline.OrderBy(x => x.Key.At).Select(x => new TimedTokenUsage(x.Key.At, x.Value.Tokens, x.Value.CostUsd, x.Value.Breakdown)).ToArray();
         var timedModelSeries = modelTimeline.OrderBy(x => x.Key.At).Select(x => new TimedModelUsage(x.Key.At, x.Key.Model, x.Value.Tokens, x.Value.CostUsd, x.Key.Priced, x.Value.Breakdown)).ToArray();
+        SavePersistentCacheIfDirty();
         SanitizedLogger.Write("Analytics refreshed: models=" + models.Length + ", files=" + files.Length + ", streams=" + LogicalStreamsLastRead + ", duplicateSnapshots=" + DuplicatePhysicalFilesIgnoredLastRead + ", ms=" + stopwatch.ElapsedMilliseconds);
         var quotaSeries = quotaTimeline.Values.OrderBy(x => x.At).ToArray();
         return new(todayBuckets.Sum(x => x.Value.Total), total, models.Sum(x => x.CostUsd), models.Sum(x => x.CostUsd) * usdBrl, total == 0 ? 0 : 100d * models.Where(x => x.Priced).Sum(x => x.Tokens) / total, models, todayUsd, todayUsd * usdBrl, dailySeries, timedSeries, usdBrl, timedModelSeries, chats, quotaSeries);
@@ -364,6 +383,28 @@ public sealed class LocalUsageAnalyticsService
         return total;
     }
 
+    /// <summary>
+    /// The descriptor comes from the first records of an append-only rollout. Reuse it while
+    /// the cached bytes are provably unchanged (same signature, or growth whose prefix marker
+    /// still matches); anything else, including a descriptor that found no metadata yet, is
+    /// read again.
+    /// </summary>
+    private FileDescriptor DescribeCached(string path)
+    {
+        if (_cache.TryGetValue(path, out var cached) && cached.Descriptor is { HasMetadata: true } descriptor)
+        {
+            try
+            {
+                var signature = FileSignature.Create(path);
+                if (signature == cached.Signature ||
+                    signature.Length > cached.Signature.Length && PrefixMarker.Create(path, cached.Signature.Length) == cached.PrefixMarker)
+                    return descriptor;
+            }
+            catch (Exception error) when (error is IOException or UnauthorizedAccessException) { }
+        }
+        return Describe(path);
+    }
+
     private static FileDescriptor Describe(string path)
     {
         string? sessionId = null;
@@ -393,7 +434,7 @@ public sealed class LocalUsageAnalyticsService
                 var projectPath = ReadString(meta, "cwd");
                 startedAt = ReadTimestamp(root) ?? ReadTimestamp(meta);
                 fork = !string.IsNullOrWhiteSpace(ReadString(meta, "forked_from_id")) || ReadString(meta, "thread_source") == "subagent";
-                return new(path, sessionId ?? path, fileId ?? path, parentThreadId, projectPath, fork, startedAt);
+                return new(path, sessionId ?? path, fileId ?? path, parentThreadId, projectPath, fork, startedAt, HasMetadata: true);
             }
         }
         catch { SanitizedLogger.Write("Analytics metadata skipped"); }
@@ -483,7 +524,7 @@ public sealed class LocalUsageAnalyticsService
 
     private static string? ReadString(JsonElement element, string name) => element.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.String ? value.GetString() : null;
     private static DateTimeOffset? ReadTimestamp(JsonElement element) => ReadString(element, "timestamp") is { } value && DateTimeOffset.TryParse(value, out var timestamp) ? timestamp.ToUniversalTime() : null;
-    private sealed record FileDescriptor(string Path, string SessionId, string FileId, string? ParentThreadId, string? ProjectPath, bool IsFork, DateTimeOffset? StartedAt)
+    private sealed record FileDescriptor(string Path, string SessionId, string FileId, string? ParentThreadId, string? ProjectPath, bool IsFork, DateTimeOffset? StartedAt, bool HasMetadata = false)
     {
         public string ThreadId => FileId;
     }
@@ -491,7 +532,7 @@ public sealed class LocalUsageAnalyticsService
     private enum ParseKind { Partial, Rebuild, Append }
     private sealed record ParsePlan(FileDescriptor File, FileSignature Signature, CachedFile? Previous, ParseKind Kind, string FallbackModel);
     private sealed record ParsePlanResult(ParsePlan Plan, ParseAggregateResult? Parsed, Exception? Error);
-    private sealed record CachedFile(FileSignature Signature, bool IsFork, string FallbackModel, Dictionary<BucketKey, Aggregate> Buckets, Dictionary<TimelineKey, TimelineAggregate> Timeline, Dictionary<ModelTimelineKey, TimelineAggregate> ModelTimeline, Dictionary<QuotaTimelineKey, TimedQuotaUsage> QuotaTimeline, Totals? LastTotals, string LastModel, DateTimeOffset? LastUsageAt, string PrefixMarker);
+    private sealed record CachedFile(FileSignature Signature, bool IsFork, string FallbackModel, Dictionary<BucketKey, Aggregate> Buckets, Dictionary<TimelineKey, TimelineAggregate> Timeline, Dictionary<ModelTimelineKey, TimelineAggregate> ModelTimeline, Dictionary<QuotaTimelineKey, TimedQuotaUsage> QuotaTimeline, Totals? LastTotals, string LastModel, DateTimeOffset? LastUsageAt, string PrefixMarker, FileDescriptor? Descriptor);
     private sealed record ParseAggregateResult(Dictionary<BucketKey, Aggregate> Buckets, Dictionary<TimelineKey, TimelineAggregate> Timeline, Dictionary<ModelTimelineKey, TimelineAggregate> ModelTimeline, Dictionary<QuotaTimelineKey, TimedQuotaUsage> QuotaTimeline, Totals? LastTotals, string LastModel, DateTimeOffset? LastUsageAt, int MalformedLineCount);
     private readonly record struct FileSignature(long Length, long LastWriteUtcTicks)
     {
@@ -519,6 +560,209 @@ public sealed class LocalUsageAnalyticsService
             if (read > 0) hash.AppendData(buffer, 0, read);
         }
     }
+    // Bump whenever Describe/ParseAggregate change what a cached entry means; older files are discarded.
+    private const int PersistentCacheFormat = 1;
+    private const string PersistentCacheMagic = "AQTRACKER-USAGE-CACHE";
+
+    private static string PricesFingerprint() => string.Join(";", Prices.OrderBy(x => x.Key, StringComparer.OrdinalIgnoreCase)
+        .Select(x => x.Key.ToLowerInvariant() + "=" + x.Value.Input.ToString(System.Globalization.CultureInfo.InvariantCulture) + "/" +
+                     x.Value.Cached.ToString(System.Globalization.CultureInfo.InvariantCulture) + "/" + x.Value.Output.ToString(System.Globalization.CultureInfo.InvariantCulture)));
+
+    private void EnsurePersistentCacheLoaded()
+    {
+        if (_persistentCacheLoaded) return;
+        _persistentCacheLoaded = true;
+        if (_persistentCachePath is null || !File.Exists(_persistentCachePath)) return;
+        try
+        {
+            using var stream = new FileStream(_persistentCachePath, FileMode.Open, FileAccess.Read, FileShare.Read);
+            using var reader = new BinaryReader(stream, System.Text.Encoding.UTF8);
+            if (reader.ReadString() != PersistentCacheMagic || reader.ReadInt32() != PersistentCacheFormat || reader.ReadString() != PricesFingerprint()) return;
+            var loaded = new Dictionary<string, CachedFile>(StringComparer.OrdinalIgnoreCase);
+            var count = reader.ReadInt32();
+            for (var index = 0; index < count; index++)
+            {
+                var path = reader.ReadString();
+                loaded[path] = ReadCachedFile(reader, path);
+            }
+            foreach (var pair in loaded) _cache[pair.Key] = pair.Value;
+            FilesLoadedFromPersistentCache = loaded.Count;
+        }
+        catch (Exception error)
+        {
+            // A missing, truncated or foreign cache only costs one cold parse; never fail the read.
+            SanitizedLogger.Write("Analytics cache discarded: " + error.GetType().Name);
+        }
+    }
+
+    private void SavePersistentCacheIfDirty()
+    {
+        if (_persistentCachePath is null || !_persistentCacheDirty) return;
+        var temporary = _persistentCachePath + ".tmp";
+        try
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(_persistentCachePath)!);
+            using (var stream = new FileStream(temporary, FileMode.Create, FileAccess.Write, FileShare.None))
+            using (var writer = new BinaryWriter(stream, System.Text.Encoding.UTF8))
+            {
+                writer.Write(PersistentCacheMagic);
+                writer.Write(PersistentCacheFormat);
+                writer.Write(PricesFingerprint());
+                writer.Write(_cache.Count);
+                foreach (var pair in _cache)
+                {
+                    writer.Write(pair.Key);
+                    WriteCachedFile(writer, pair.Value);
+                }
+            }
+            if (File.Exists(_persistentCachePath)) File.Replace(temporary, _persistentCachePath, null);
+            else File.Move(temporary, _persistentCachePath);
+            _persistentCacheDirty = false;
+        }
+        catch (Exception error)
+        {
+            SanitizedLogger.Write("Analytics cache save failed: " + error.GetType().Name);
+            try { if (File.Exists(temporary)) File.Delete(temporary); } catch (Exception) { }
+        }
+    }
+
+    private static void WriteCachedFile(BinaryWriter writer, CachedFile cached)
+    {
+        writer.Write(cached.Signature.Length);
+        writer.Write(cached.Signature.LastWriteUtcTicks);
+        writer.Write(cached.IsFork);
+        writer.Write(cached.FallbackModel);
+        writer.Write(cached.LastModel);
+        writer.Write(cached.PrefixMarker);
+        writer.Write(cached.LastTotals.HasValue);
+        if (cached.LastTotals is { } totals) WriteTotals(writer, totals);
+        WriteOptionalTime(writer, cached.LastUsageAt);
+        writer.Write(cached.Descriptor is not null);
+        if (cached.Descriptor is { } descriptor)
+        {
+            writer.Write(descriptor.SessionId);
+            writer.Write(descriptor.FileId);
+            WriteOptionalString(writer, descriptor.ParentThreadId);
+            WriteOptionalString(writer, descriptor.ProjectPath);
+            writer.Write(descriptor.IsFork);
+            WriteOptionalTime(writer, descriptor.StartedAt);
+            writer.Write(descriptor.HasMetadata);
+        }
+        writer.Write(cached.Buckets.Count);
+        foreach (var pair in cached.Buckets)
+        {
+            writer.Write(pair.Key.Day.Ticks);
+            writer.Write(pair.Key.Model);
+            writer.Write(pair.Value.Input); writer.Write(pair.Value.Cached); writer.Write(pair.Value.Output); writer.Write(pair.Value.Reasoning); writer.Write(pair.Value.Total);
+        }
+        writer.Write(cached.Timeline.Count);
+        foreach (var pair in cached.Timeline)
+        {
+            WriteTime(writer, pair.Key.At);
+            WriteTimelineAggregate(writer, pair.Value);
+        }
+        writer.Write(cached.ModelTimeline.Count);
+        foreach (var pair in cached.ModelTimeline)
+        {
+            WriteTime(writer, pair.Key.At);
+            writer.Write(pair.Key.Model);
+            writer.Write(pair.Key.Priced);
+            WriteTimelineAggregate(writer, pair.Value);
+        }
+        writer.Write(cached.QuotaTimeline.Count);
+        foreach (var pair in cached.QuotaTimeline)
+        {
+            writer.Write(pair.Key.Day.Ticks);
+            WriteTime(writer, pair.Value.At);
+            writer.Write(pair.Value.UsedPercent);
+        }
+    }
+
+    private static CachedFile ReadCachedFile(BinaryReader reader, string path)
+    {
+        var signature = new FileSignature(reader.ReadInt64(), reader.ReadInt64());
+        var isFork = reader.ReadBoolean();
+        var fallbackModel = reader.ReadString();
+        var lastModel = reader.ReadString();
+        var prefixMarker = reader.ReadString();
+        Totals? lastTotals = reader.ReadBoolean() ? ReadTotals(reader) : null;
+        var lastUsageAt = ReadOptionalTime(reader);
+        FileDescriptor? descriptor = null;
+        if (reader.ReadBoolean())
+            descriptor = new FileDescriptor(path, reader.ReadString(), reader.ReadString(), ReadOptionalString(reader), ReadOptionalString(reader),
+                reader.ReadBoolean(), ReadOptionalTime(reader), reader.ReadBoolean());
+        var buckets = new Dictionary<BucketKey, Aggregate>();
+        for (int index = 0, count = reader.ReadInt32(); index < count; index++)
+            buckets[new BucketKey(new DateTime(reader.ReadInt64(), DateTimeKind.Local), reader.ReadString())] =
+                new Aggregate(reader.ReadInt64(), reader.ReadInt64(), reader.ReadInt64(), reader.ReadInt64(), reader.ReadInt64());
+        var timeline = new Dictionary<TimelineKey, TimelineAggregate>();
+        for (int index = 0, count = reader.ReadInt32(); index < count; index++)
+            timeline[new TimelineKey(ReadTime(reader))] = ReadTimelineAggregate(reader);
+        var modelTimeline = new Dictionary<ModelTimelineKey, TimelineAggregate>();
+        for (int index = 0, count = reader.ReadInt32(); index < count; index++)
+            modelTimeline[new ModelTimelineKey(ReadTime(reader), reader.ReadString(), reader.ReadBoolean())] = ReadTimelineAggregate(reader);
+        var quotaTimeline = new Dictionary<QuotaTimelineKey, TimedQuotaUsage>();
+        for (int index = 0, count = reader.ReadInt32(); index < count; index++)
+            quotaTimeline[new QuotaTimelineKey(new DateTime(reader.ReadInt64(), DateTimeKind.Local))] = new TimedQuotaUsage(ReadTime(reader), reader.ReadDouble());
+        return new CachedFile(signature, isFork, fallbackModel, buckets, timeline, modelTimeline, quotaTimeline, lastTotals, lastModel, lastUsageAt, prefixMarker, descriptor);
+    }
+
+    private static void WriteTotals(BinaryWriter writer, Totals totals)
+    {
+        writer.Write(totals.Input); writer.Write(totals.Cached); writer.Write(totals.Output); writer.Write(totals.Reasoning); writer.Write(totals.Total);
+    }
+
+    private static Totals ReadTotals(BinaryReader reader) => new(reader.ReadInt64(), reader.ReadInt64(), reader.ReadInt64(), reader.ReadInt64(), reader.ReadInt64());
+
+    private static void WriteTimelineAggregate(BinaryWriter writer, TimelineAggregate aggregate)
+    {
+        writer.Write(aggregate.Tokens);
+        writer.Write(aggregate.CostUsd);
+        writer.Write(aggregate.Breakdown is not null);
+        if (aggregate.Breakdown is not { } breakdown) return;
+        writer.Write(breakdown.CachedReadTokens); writer.Write(breakdown.InputTokens); writer.Write(breakdown.OutputTokens); writer.Write(breakdown.ReasoningTokens);
+        writer.Write(breakdown.CachedReadCostUsd); writer.Write(breakdown.InputCostUsd); writer.Write(breakdown.OutputCostUsd); writer.Write(breakdown.ReasoningCostUsd);
+    }
+
+    private static TimelineAggregate ReadTimelineAggregate(BinaryReader reader)
+    {
+        var tokens = reader.ReadInt64();
+        var cost = reader.ReadDecimal();
+        TokenUsageBreakdown? breakdown = reader.ReadBoolean()
+            ? new TokenUsageBreakdown(reader.ReadInt64(), reader.ReadInt64(), reader.ReadInt64(), reader.ReadInt64(), reader.ReadDecimal(), reader.ReadDecimal(), reader.ReadDecimal(), reader.ReadDecimal())
+            : null;
+        return new TimelineAggregate(tokens, cost, breakdown);
+    }
+
+    private static void WriteTime(BinaryWriter writer, DateTimeOffset value)
+    {
+        writer.Write(value.UtcTicks);
+        writer.Write(value.Offset.Ticks);
+    }
+
+    private static DateTimeOffset ReadTime(BinaryReader reader)
+    {
+        var utcTicks = reader.ReadInt64();
+        var offset = new TimeSpan(reader.ReadInt64());
+        return new DateTimeOffset(new DateTime(utcTicks, DateTimeKind.Utc)).ToOffset(offset);
+    }
+
+    private static void WriteOptionalTime(BinaryWriter writer, DateTimeOffset? value)
+    {
+        writer.Write(value.HasValue);
+        if (value is { } time) WriteTime(writer, time);
+    }
+
+    private static DateTimeOffset? ReadOptionalTime(BinaryReader reader) => reader.ReadBoolean() ? ReadTime(reader) : null;
+
+    private static void WriteOptionalString(BinaryWriter writer, string? value)
+    {
+        writer.Write(value is not null);
+        if (value is not null) writer.Write(value);
+    }
+
+    private static string? ReadOptionalString(BinaryReader reader) => reader.ReadBoolean() ? reader.ReadString() : null;
+
     private static bool HasFinalNewline(string path, long length)
     {
         if (length == 0) return true;

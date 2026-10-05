@@ -8,6 +8,23 @@ public partial class App : System.Windows.Application
     private Mutex? _singleInstanceMutex;
     private EventWaitHandle? _shutdownEvent;
 
+    /// <summary>
+    /// Multicore JIT replays the previous run's startup JIT on spare cores, so a sign-in start
+    /// competing with every other startup app compiles less on the UI thread. NGen would need
+    /// elevation, which this per-user install never asks for. Any failure just means normal JIT.
+    /// </summary>
+    private static void StartJitProfile()
+    {
+        try
+        {
+            var directory = System.IO.Path.Combine(AqTracker.Core.UserFolders.LocalApplicationData, "AqTracker", "jit");
+            System.IO.Directory.CreateDirectory(directory);
+            System.Runtime.ProfileOptimization.SetProfileRoot(directory);
+            System.Runtime.ProfileOptimization.StartProfile("startup.jitprofile");
+        }
+        catch (Exception error) when (error is System.IO.IOException or UnauthorizedAccessException or InvalidOperationException or ArgumentException or NotSupportedException) { }
+    }
+
     protected override async void OnStartup(System.Windows.StartupEventArgs e)
     {
         if (!_launchMainWindow) { base.OnStartup(e); return; }
@@ -27,6 +44,8 @@ public partial class App : System.Windows.Application
             Shutdown();
             return;
         }
+        // Only the surviving instance records: a duplicate that exits at once would overwrite the profile.
+        StartJitProfile();
 
         var shutdownEventName = GetShutdownEventName();
         _shutdownEvent = new EventWaitHandle(false, EventResetMode.AutoReset, shutdownEventName);

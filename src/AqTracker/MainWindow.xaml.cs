@@ -24,7 +24,7 @@ public partial class MainWindow : Window
     private bool _runtimeStarted;
     private readonly MainViewModel _viewModel;
     private readonly CancellationTokenSource _shutdown = new();
-    private readonly LocalUsageAnalyticsService _analytics = new();
+    private readonly LocalUsageAnalyticsService _analytics = new(persistentCachePath: LocalUsageAnalyticsService.TryGetDefaultPersistentCachePath());
     private readonly StartupAnalyticsCoordinator _startupAnalytics = new();
     private readonly AgentActivityService _agentActivity = new();
     private readonly UpdateController _updates = new();

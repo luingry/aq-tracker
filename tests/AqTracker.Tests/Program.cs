@@ -2358,6 +2358,94 @@ using (var root = StartHiddenCmd("/d /c start \"\" /b ping -n 60 127.0.0.1 >nul 
 }
 Assert(!Process.GetProcessesByName("taskkill").Any(process => !taskkillBefore.Contains(process.Id)), "job termination never launches taskkill.exe");
 
+// Persistent analytics cache: a restarted service must reproduce the cold result without re-parsing.
+var persistedRoot = Path.Combine(Path.GetTempPath(), "aq-tracker-persisted-" + Guid.NewGuid());
+Directory.CreateDirectory(persistedRoot);
+var persistedCachePath = Path.Combine(persistedRoot, "cache", "usage-analytics.bin");
+var persistedNow = new DateTimeOffset(2026, 8, 12, 12, 0, 0, TimeSpan.Zero);
+var persistedSessionPath = Path.Combine(persistedRoot, "rollout-2026-08-12T09-00-00-main.jsonl");
+File.WriteAllText(persistedSessionPath, """
+{"timestamp":"2026-08-12T09:00:00Z","type":"session_meta","payload":{"session_id":"persist-main","id":"persist-main","cwd":"C:\\nowhere-persisted"}}
+{"timestamp":"2026-08-12T09:00:01Z","type":"turn_context","payload":{"type":"turn_context","model":"gpt-5.6-terra"}}
+{"timestamp":"2026-08-12T09:01:00Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":1000,"cached_input_tokens":200,"output_tokens":300,"reasoning_output_tokens":50,"total_tokens":1300}},"rate_limits":{"limit_id":"codex","primary":{"used_percent":12.5,"window_minutes":10080}}}}
+{"timestamp":"2026-08-11T22:00:00Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":1500,"cached_input_tokens":300,"output_tokens":400,"reasoning_output_tokens":60,"total_tokens":1900}}}}
+""" + "\n");
+var persistedForkPath = Path.Combine(persistedRoot, "rollout-2026-08-12T10-00-00-fork.jsonl");
+File.WriteAllText(persistedForkPath, """
+{"timestamp":"2026-08-12T10:00:00Z","type":"session_meta","payload":{"session_id":"persist-fork","id":"persist-fork","forked_from_id":"persist-main","parent_thread_id":"persist-main"}}
+{"timestamp":"2026-08-12T10:00:01Z","type":"turn_context","payload":{"type":"turn_context","model":"unpriced-model"}}
+{"timestamp":"2026-08-12T10:05:00Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":70,"cached_input_tokens":0,"output_tokens":30,"total_tokens":100}}}}
+""" + "\n");
+static string SummarizeUsage(UsageAnalytics usage) => string.Join("|",
+    usage.TodayTokens, usage.MonthTokens, usage.MonthUsd, usage.TodayUsd, usage.CoveragePercent,
+    string.Join(",", usage.Models.Select(x => $"{x.Model}:{x.Tokens}:{x.CostUsd}:{x.Priced}")),
+    string.Join(",", (usage.Chats ?? []).Select(x => $"{x.ThreadId}:{x.ProjectPath}:{x.Tokens}:{x.CostUsd}:{x.PricedTokens}:{x.LastUpdatedAt:O}")),
+    string.Join(",", (usage.Timeline ?? []).Select(x => $"{x.At:O}:{x.Tokens}:{x.CostUsd}")),
+    string.Join(",", (usage.ModelTimeline ?? []).Select(x => $"{x.At:O}:{x.Model}:{x.Tokens}:{x.Priced}")),
+    string.Join(",", (usage.QuotaTimeline ?? []).Select(x => $"{x.At:O}:{x.UsedPercent}")),
+    string.Join(",", (usage.DailySeries ?? []).Select(x => $"{x.Day:yyyy-MM-dd}:{x.Tokens}:{x.UsdCost}")));
+var coldPersisted = new LocalUsageAnalyticsService(() => persistedNow, persistentCachePath: persistedCachePath);
+var coldPersistedUsage = coldPersisted.Read(5.5m, persistedRoot);
+Assert(coldPersisted.FilesParsedLastRead == 2 && coldPersistedUsage.MonthTokens == 2000 && File.Exists(persistedCachePath), "cold read parses every rollout and writes the persistent analytics cache");
+var restartedPersisted = new LocalUsageAnalyticsService(() => persistedNow, persistentCachePath: persistedCachePath);
+var restartedPersistedUsage = restartedPersisted.Read(5.5m, persistedRoot);
+Assert(restartedPersisted.FilesLoadedFromPersistentCache == 2 && restartedPersisted.FilesParsedLastRead == 0 && restartedPersisted.BytesReadLastRead == 0, "restart serves unchanged rollouts from the persistent cache without reading JSONL bytes");
+Assert(SummarizeUsage(restartedPersistedUsage) == SummarizeUsage(coldPersistedUsage), "persisted analytics reproduce the cold result exactly (models, chats, timelines, quota and daily series)");
+File.AppendAllText(persistedSessionPath, "{\"timestamp\":\"2026-08-12T11:00:00Z\",\"type\":\"event_msg\",\"payload\":{\"type\":\"token_count\",\"info\":{\"total_token_usage\":{\"input_tokens\":1600,\"cached_input_tokens\":300,\"output_tokens\":450,\"reasoning_output_tokens\":60,\"total_tokens\":2050}}}}\n");
+var appendedPersistedUsage = restartedPersisted.Read(5.5m, persistedRoot);
+var appendedReferenceUsage = new LocalUsageAnalyticsService(() => persistedNow).Read(5.5m, persistedRoot);
+Assert(restartedPersisted.FilesAppendedLastRead == 1 && SummarizeUsage(appendedPersistedUsage) == SummarizeUsage(appendedReferenceUsage), "append after a restart continues from the persisted offset and matches a cold reference");
+var afterAppendRestart = new LocalUsageAnalyticsService(() => persistedNow, persistentCachePath: persistedCachePath);
+Assert(SummarizeUsage(afterAppendRestart.Read(5.5m, persistedRoot)) == SummarizeUsage(appendedReferenceUsage) && afterAppendRestart.FilesParsedLastRead == 0, "the appended state is persisted for the next restart");
+var persistedForkText = File.ReadAllText(persistedForkPath);
+File.WriteAllText(persistedForkPath, persistedForkText.Replace("\"input_tokens\":70", "\"input_tokens\":80").Replace("\"output_tokens\":30", "\"output_tokens\":20"));
+File.SetLastWriteTimeUtc(persistedForkPath, DateTime.UtcNow.AddSeconds(5));
+var rewrittenRestart = new LocalUsageAnalyticsService(() => persistedNow, persistentCachePath: persistedCachePath);
+var rewrittenUsage = rewrittenRestart.Read(5.5m, persistedRoot);
+Assert(rewrittenRestart.FilesRebuiltLastRead == 1 && SummarizeUsage(rewrittenUsage) == SummarizeUsage(new LocalUsageAnalyticsService(() => persistedNow).Read(5.5m, persistedRoot)), "a same-length rewrite while the app was closed rebuilds that rollout instead of trusting the persisted entry");
+File.WriteAllBytes(persistedCachePath, [1, 2, 3, 4, 5]);
+var corruptPersisted = new LocalUsageAnalyticsService(() => persistedNow, persistentCachePath: persistedCachePath);
+Assert(SummarizeUsage(corruptPersisted.Read(5.5m, persistedRoot)) == SummarizeUsage(rewrittenUsage) && corruptPersisted.FilesLoadedFromPersistentCache == 0 && corruptPersisted.FilesParsedLastRead == 2, "a corrupt persistent cache is discarded and the history is parsed cold");
+Assert(new LocalUsageAnalyticsService(() => persistedNow, persistentCachePath: persistedCachePath).Read(5.5m, persistedRoot) is not null && new FileInfo(persistedCachePath).Length > 5, "the discarded cache is replaced by a valid one");
+File.Delete(persistedSessionPath);
+var deletedPersisted = new LocalUsageAnalyticsService(() => persistedNow, persistentCachePath: persistedCachePath);
+Assert(deletedPersisted.Read(5.5m, persistedRoot).MonthTokens == 100 && deletedPersisted.FilesParsedLastRead == 0, "rollouts deleted while the app was closed drop out of the persisted totals");
+Directory.Delete(persistedRoot, true);
+
+// Activity hot set: dated layouts poll today's folders and cached rollouts between full walks.
+var datedActivityRoot = Path.Combine(Path.GetTempPath(), "aq-tracker-dated-activity-" + Guid.NewGuid());
+var datedNow = new DateTimeOffset(2026, 8, 14, 13, 30, 0, TimeSpan.Zero);
+var datedToday = Path.Combine(datedActivityRoot, datedNow.LocalDateTime.ToString("yyyy"), datedNow.LocalDateTime.ToString("MM"), datedNow.LocalDateTime.ToString("dd"));
+var datedOld = Path.Combine(datedActivityRoot, "2026", "08", "01");
+Directory.CreateDirectory(datedToday); Directory.CreateDirectory(datedOld);
+void WriteDatedRollout(string path, string id, DateTimeOffset startedAt, DateTimeOffset mtime)
+{
+    File.WriteAllText(path, $"{{\"timestamp\":\"{startedAt.UtcDateTime:O}\",\"type\":\"session_meta\",\"payload\":{{\"session_id\":\"{id}\",\"id\":\"{id}\",\"thread_source\":\"user\"}}}}\n{{\"timestamp\":\"{startedAt.AddSeconds(1).UtcDateTime:O}\",\"type\":\"event_msg\",\"payload\":{{\"type\":\"task_started\",\"turn_id\":\"{id}-turn\"}}}}\n");
+    File.SetLastWriteTimeUtc(path, mtime.UtcDateTime);
+}
+WriteDatedRollout(Path.Combine(datedToday, $"rollout-{datedNow.LocalDateTime:yyyy-MM-dd}T13-29-00-dated-today.jsonl"), "dated-today", datedNow.AddMinutes(-1), datedNow);
+var datedOldPath = Path.Combine(datedOld, "rollout-2026-08-01T10-00-00-dated-old.jsonl");
+WriteDatedRollout(datedOldPath, "dated-old", new DateTimeOffset(2026, 8, 1, 10, 0, 0, TimeSpan.Zero), new DateTimeOffset(2026, 8, 1, 11, 0, 0, TimeSpan.Zero));
+var hotSetService = new AgentActivityService(() => datedNow, fullScanInterval: TimeSpan.FromHours(1));
+Assert(hotSetService.Read(null, datedActivityRoot).Select(x => x.ThreadId).SequenceEqual(["dated-today"]) && hotSetService.LastReadWasFullScan, "first dated-layout read walks the whole tree");
+Assert(hotSetService.Read(null, datedActivityRoot).Select(x => x.ThreadId).SequenceEqual(["dated-today"]) && !hotSetService.LastReadWasFullScan, "later reads keep cached agents from the hot set without a full walk");
+WriteDatedRollout(Path.Combine(datedToday, $"rollout-{datedNow.LocalDateTime:yyyy-MM-dd}T13-29-30-dated-new.jsonl"), "dated-new", datedNow.AddSeconds(-30), datedNow.AddMinutes(-20));
+var hotSetAfterNew = hotSetService.Read(null, datedActivityRoot);
+Assert(hotSetAfterNew.Any(x => x.ThreadId == "dated-new") && hotSetAfterNew.Any(x => x.ThreadId == "dated-today") && !hotSetService.LastReadWasFullScan, "a new rollout in today's folder is found by the hot set even with a stale mtime");
+File.AppendAllText(datedOldPath, $"{{\"timestamp\":\"{datedNow.AddSeconds(-5).UtcDateTime:O}\",\"type\":\"event_msg\",\"payload\":{{\"type\":\"task_started\",\"turn_id\":\"dated-old-resumed\"}}}}\n");
+File.SetLastWriteTimeUtc(datedOldPath, datedNow.UtcDateTime);
+var fullWalkService = new AgentActivityService(() => datedNow, fullScanInterval: TimeSpan.Zero);
+Assert(fullWalkService.Read(null, datedActivityRoot).Any(x => x.ThreadId == "dated-old") && fullWalkService.LastReadWasFullScan, "a resumed rollout in an old folder is found by the periodic full walk");
+var flatRoot = Path.Combine(Path.GetTempPath(), "aq-tracker-flat-activity-" + Guid.NewGuid());
+Directory.CreateDirectory(flatRoot);
+WriteDatedRollout(Path.Combine(flatRoot, "flat.jsonl"), "flat", datedNow.AddMinutes(-1), datedNow);
+var flatService = new AgentActivityService(() => datedNow, fullScanInterval: TimeSpan.FromHours(1));
+_ = flatService.Read(null, flatRoot);
+WriteDatedRollout(Path.Combine(flatRoot, "flat-second.jsonl"), "flat-second", datedNow.AddMinutes(-1), datedNow);
+Assert(flatService.Read(null, flatRoot).Count == 2 && flatService.LastReadWasFullScan, "roots without the dated layout keep the full walk on every read");
+Directory.Delete(flatRoot, true);
+Directory.Delete(datedActivityRoot, true);
+
 Console.WriteLine("All AqTracker core tests passed (including Claude engagement, sessions, OAuth, DPAPI, usage and WPF bindings).");
 
 static void Assert(bool condition, string message) { if (!condition) throw new InvalidOperationException("Test failed: " + message); }

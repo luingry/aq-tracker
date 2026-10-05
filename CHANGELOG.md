@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.29.9] - 2026-10-04
+
+### Changed
+
+- Starting at Windows sign-in no longer re-reads the whole local Codex history. Per-rollout usage totals are kept in `%LOCALAPPDATA%\AqTracker\cache\usage-analytics.bin`, so a restart reads only the rollouts that changed (about 0.2 s instead of 10+ s and 20+ s of CPU on a 4 GB history). A missing, outdated or damaged cache is rebuilt automatically with exactly the same totals.
+- The periodic usage refresh reuses each rollout's session metadata while its bytes are unchanged, cutting each refresh from ~0.6 s to ~0.2 s of CPU.
+- Live agent detection polls only today's and yesterday's session folders, rollouts it is already tracking and files reported by a change watcher, with a full scan every 10 seconds as a safety net. Idle CPU use from the one-second agent poll drops by about 85%.
+- Startup JIT is replayed on spare cores from the previous run's profile (multicore JIT), so the app competes less with other sign-in programs.
+
 ## [0.29.8] - 2026-10-04
 
 ### Fixed

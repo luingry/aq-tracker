@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Globalization;
 using System.Text.Json;
 
@@ -45,16 +46,29 @@ public sealed record AgentActivitySnapshot(
 public sealed class AgentActivityService
 {
     public static readonly TimeSpan DefaultStaleAfter = TimeSpan.FromMinutes(5);
+    public static readonly TimeSpan DefaultFullScanInterval = TimeSpan.FromSeconds(10);
     private readonly Func<DateTimeOffset> _now;
     private readonly TimeSpan _staleAfter;
+    private readonly TimeSpan _fullScanInterval;
     private readonly Dictionary<string, CachedRollout> _cache = new(StringComparer.OrdinalIgnoreCase);
     private readonly ProjectRootResolver _projectRoots = new();
+    private readonly object _watchGate = new();
+    private readonly HashSet<string> _changedPaths = new(StringComparer.OrdinalIgnoreCase);
+    private FileSystemWatcher? _watcher;
+    private bool _watcherOverflowed;
+    private string? _scanRoot;
+    private bool _datedLayout;
+    private long _lastFullScanTimestamp;
 
-    public AgentActivityService(Func<DateTimeOffset>? now = null, TimeSpan? staleAfter = null)
+    public AgentActivityService(Func<DateTimeOffset>? now = null, TimeSpan? staleAfter = null, TimeSpan? fullScanInterval = null)
     {
         _now = now ?? (() => DateTimeOffset.UtcNow);
         _staleAfter = staleAfter ?? DefaultStaleAfter;
+        _fullScanInterval = fullScanInterval ?? DefaultFullScanInterval;
     }
+
+    /// <summary>True when the last read walked the whole sessions tree instead of the hot set.</summary>
+    public bool LastReadWasFullScan { get; private set; }
 
     public IReadOnlyList<ActiveAgent> Read(IReadOnlyDictionary<string, string>? titles = null, string? sessionsRoot = null)
         => ReadSnapshot(titles, sessionsRoot).ActiveAgents;
@@ -66,8 +80,7 @@ public sealed class AgentActivityService
         if (!Directory.Exists(root)) return new([], []);
 
         var cutoff = now - _staleAfter;
-        var recentFiles = Directory.EnumerateFiles(root, "*.jsonl", SearchOption.AllDirectories)
-            .Select(path => new FileInfo(path))
+        var recentFiles = EnumerateCandidates(root, now)
             .Where(file => file.Exists &&
                            (file.LastWriteTimeUtc >= cutoff.UtcDateTime ||
                             IsRecentRolloutCandidate(file, now) ||
@@ -302,6 +315,134 @@ public sealed class AgentActivityService
         if (!_cache.TryGetValue(file.FullName, out var cached)) return false;
         var signature = new RolloutSignature(file.Length, file.LastWriteTimeUtc.Ticks);
         return cached.State.LastActivityAt >= cutoff || cached.Signature != signature;
+    }
+
+    /// <summary>
+    /// Walking every rollout ever written each second costs ~0.1 CPU core on a large history.
+    /// For Codex's dated layout (root\yyyy\MM\dd) the per-second read only stats the hot set:
+    /// cached rollouts, today's and yesterday's folders, and paths reported by a watcher.
+    /// A periodic full walk remains the source of truth for anything the watcher misses
+    /// (e.g. a resumed old session whose change notification was coalesced or overflowed).
+    /// Roots without that layout keep the original full walk on every read.
+    /// </summary>
+    private IEnumerable<FileInfo> EnumerateCandidates(string root, DateTimeOffset now)
+    {
+        var fullRoot = Path.GetFullPath(root);
+        if (!string.Equals(_scanRoot, fullRoot, StringComparison.OrdinalIgnoreCase))
+        {
+            StopWatcher();
+            _scanRoot = fullRoot;
+            _datedLayout = false;
+            _lastFullScanTimestamp = 0;
+        }
+        string[] changed;
+        bool overflowed;
+        lock (_watchGate)
+        {
+            changed = _changedPaths.ToArray();
+            _changedPaths.Clear();
+            overflowed = _watcherOverflowed;
+            _watcherOverflowed = false;
+        }
+        var elapsedTicks = Stopwatch.GetTimestamp() - _lastFullScanTimestamp;
+        var fullScanDue = _lastFullScanTimestamp == 0 || elapsedTicks >= _fullScanInterval.TotalSeconds * Stopwatch.Frequency;
+        if (!_datedLayout || _watcher is null || overflowed || fullScanDue)
+        {
+            LastReadWasFullScan = true;
+            _lastFullScanTimestamp = Stopwatch.GetTimestamp();
+            _datedLayout = HasDatedLayout(fullRoot);
+            if (_datedLayout && _watcher is null) StartWatcher(fullRoot);
+            return Directory.EnumerateFiles(root, "*.jsonl", SearchOption.AllDirectories).Select(path => new FileInfo(path));
+        }
+
+        LastReadWasFullScan = false;
+        var paths = new HashSet<string>(_cache.Keys, StringComparer.OrdinalIgnoreCase);
+        foreach (var directory in RecentDateDirectories(fullRoot, now))
+        {
+            try { paths.UnionWith(Directory.EnumerateFiles(directory, "*.jsonl", SearchOption.AllDirectories)); }
+            catch (IOException) { }
+            catch (UnauthorizedAccessException) { }
+        }
+        foreach (var path in changed)
+        {
+            if (!path.EndsWith(".jsonl", StringComparison.OrdinalIgnoreCase)) continue;
+            try { paths.Add(Path.GetFullPath(path)); }
+            catch (Exception error) when (error is ArgumentException or NotSupportedException or PathTooLongException) { }
+        }
+        return paths.Select(path => new FileInfo(path));
+    }
+
+    private static bool HasDatedLayout(string root)
+    {
+        try
+        {
+            return Directory.EnumerateDirectories(root).Any(directory =>
+            {
+                var name = Path.GetFileName(directory);
+                return name.Length == 4 && name.All(char.IsDigit);
+            });
+        }
+        catch (IOException) { return false; }
+        catch (UnauthorizedAccessException) { return false; }
+    }
+
+    private static IEnumerable<string> RecentDateDirectories(string root, DateTimeOffset now)
+    {
+        // Rollout folders follow the local calendar; the UTC dates cover a writer that disagrees.
+        var localToday = now.LocalDateTime.Date;
+        var utcToday = now.UtcDateTime.Date;
+        var dates = new HashSet<DateTime> { localToday, localToday.AddDays(-1), utcToday, utcToday.AddDays(-1) };
+        foreach (var date in dates)
+        {
+            var directory = Path.Combine(root, date.ToString("yyyy", CultureInfo.InvariantCulture), date.ToString("MM", CultureInfo.InvariantCulture), date.ToString("dd", CultureInfo.InvariantCulture));
+            if (Directory.Exists(directory)) yield return directory;
+        }
+    }
+
+    private void StartWatcher(string root)
+    {
+        try
+        {
+            var watcher = new FileSystemWatcher(root, "*.jsonl")
+            {
+                IncludeSubdirectories = true,
+                NotifyFilter = NotifyFilters.FileName | NotifyFilters.LastWrite | NotifyFilters.Size,
+                InternalBufferSize = 64 * 1024
+            };
+            watcher.Changed += OnWatchedPathChanged;
+            watcher.Created += OnWatchedPathChanged;
+            watcher.Renamed += OnWatchedPathChanged;
+            watcher.Error += (_, _) => { lock (_watchGate) _watcherOverflowed = true; };
+            watcher.EnableRaisingEvents = true;
+            _watcher = watcher;
+        }
+        catch (Exception error) when (error is IOException or ArgumentException or UnauthorizedAccessException or PlatformNotSupportedException)
+        {
+            // Without notifications every read falls back to the full walk.
+            _watcher = null;
+        }
+    }
+
+    private void StopWatcher()
+    {
+        if (_watcher is null) return;
+        try { _watcher.EnableRaisingEvents = false; _watcher.Dispose(); } catch (Exception) { }
+        _watcher = null;
+        lock (_watchGate)
+        {
+            _changedPaths.Clear();
+            _watcherOverflowed = false;
+        }
+    }
+
+    private void OnWatchedPathChanged(object sender, FileSystemEventArgs e)
+    {
+        lock (_watchGate)
+        {
+            // Bound memory if nobody reads for a while; the next read then does a full walk.
+            if (_changedPaths.Count >= 4096) { _watcherOverflowed = true; return; }
+            _changedPaths.Add(e.FullPath);
+        }
     }
 
     private static bool IsRecentRolloutCandidate(FileInfo file, DateTimeOffset now)
