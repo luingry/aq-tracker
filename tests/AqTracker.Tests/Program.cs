@@ -451,6 +451,12 @@ Assert(WidgetVisibilityPolicy.ShouldShow(true, false, false, true, false) && Wid
 Assert(WidgetVisibilityPolicy.ShouldShow(false, false, true, false, false) && WidgetVisibilityPolicy.ShouldShow(false, false, false, false, true), "Codex foreground and direct widget interaction keep the widget visible");
 Assert(!WidgetVisibilityPolicy.ShouldShow(false, false, false, false, false) && !WidgetVisibilityPolicy.ShouldShow(false, false, true, true, false), "idle widget hides immediately when Codex is backgrounded or minimized");
 {
+    var trackingSince = new DateTimeOffset(2026, 10, 5, 20, 0, 0, TimeSpan.Zero);
+    CompletedAgentWork CompletedAt(DateTimeOffset at) => new("t:turn", "t", "Agent", "Chat", "Concluído", "gpt-6-astra", "low", at.AddMinutes(-2), at);
+    Assert(!CompletionNoveltyPolicy.IsNew(CompletedAt(trackingSince.AddDays(-2)), trackingSince), "an old completion pulled back into the scan when Codex desktop appends thread_settings_applied never becomes unread");
+    Assert(CompletionNoveltyPolicy.IsNew(CompletedAt(trackingSince.AddMinutes(5)), trackingSince) && CompletionNoveltyPolicy.IsNew(CompletedAt(trackingSince.AddSeconds(-30)), trackingSince), "completions after tracking starts, or within the startup grace, still become unread");
+}
+{
     var signInWork = new ProfileActivity(false, false, true, false);
     var gate = new StartupVisibilityGate();
     Assert(!gate.Release(signInWork, default) && !gate.Release(signInWork, default), "work already present at sign-in keeps a hidden startup widget out of the way");

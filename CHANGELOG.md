@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.30.1] - 2026-10-05
+
+### Fixed
+
+- Opening the Codex desktop app no longer revives an old chat's completion as unread. Codex appends `thread_settings_applied` to the last chat's rollout on launch; the Tracker re-read that file and treated its days-old `task_complete` as new, so the Codex quota gauge and agent indicator stayed on even after Codex was closed. Completions that finished before the Tracker started watching are now recorded as seen without becoming unread.
+
 ## [0.30.0] - 2026-10-05
 
 ### Added

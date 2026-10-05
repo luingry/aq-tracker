@@ -49,6 +49,7 @@ public partial class MainWindow : Window
     private int _updateCheckRunning;
     private int _updateInstallRunning;
     private bool _agentStateInitialized;
+    private DateTimeOffset _agentTrackingSince;
     private UsageAnalytics? _lastLoadedAnalytics;
     private UpdateAvailability? _pendingUpdate;
     private ChatDetailsWindow? _chatDetailsWindow;
@@ -281,6 +282,7 @@ public partial class MainWindow : Window
         if (_demo || Interlocked.Exchange(ref _agentRefreshRunning, 1) == 1) return;
         try
         {
+            var readStartedAt = DateTimeOffset.UtcNow;
             var titles = new Dictionary<string, string>(_threadTitles, StringComparer.OrdinalIgnoreCase);
             var activityTask = Task.Run(() => _agentActivity.ReadSnapshot(titles));
             var claudeTask = Task.Run(() => _claudeActivity.ReadSnapshot());
@@ -293,10 +295,12 @@ public partial class MainWindow : Window
             {
                 _observedCompletionIds.UnionWith(activity.CompletedAgentWorks.Select(work => work.CompletionId));
                 _agentStateInitialized = true;
+                _agentTrackingSince = readStartedAt;
             }
             else
             {
-                foreach (var completed in activity.CompletedAgentWorks.Where(work => _observedCompletionIds.Add(work.CompletionId)))
+                foreach (var completed in activity.CompletedAgentWorks.Where(work => _observedCompletionIds.Add(work.CompletionId) &&
+                             CompletionNoveltyPolicy.IsNew(work, _agentTrackingSince)))
                 {
                     _unreadAgentWorks.Add(completed);
                     unreadChanged = true;
