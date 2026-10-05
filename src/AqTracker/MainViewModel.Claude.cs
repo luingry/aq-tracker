@@ -113,6 +113,21 @@ public sealed partial class MainViewModel
     public string ClaudeWeeklyReset => ClaudeReset("7d");
     public string ClaudeFiveHourAccessibleName => LocalizationManager.Format("ProfileQuotaIndicator", AgentProvider.Claude, "5h");
     public string ClaudeWeeklyAccessibleName => LocalizationManager.Format("ProfileQuotaIndicator", AgentProvider.Claude, "7d");
+    // Same forecast model as the Codex weekly window, evaluated per Claude window as of the snapshot reading.
+    private WeeklyForecast? _claudeFiveHourForecast, _claudeWeeklyForecast;
+    public string ClaudeFiveHourForecast => _claudeFiveHourForecast is { } forecast ? FormatForecast(forecast) : "";
+    public string ClaudeWeeklyForecast => _claudeWeeklyForecast is { } forecast ? FormatForecast(forecast) : "";
+    public bool HasClaudeFiveHourForecast => _claudeFiveHourForecast is not null;
+    public bool HasClaudeWeeklyForecast => _claudeWeeklyForecast is not null;
+    public bool IsClaudeFiveHourExhaustionRisk => _claudeFiveHourForecast?.Status == WeeklyForecastCalculator.RiskStatus;
+    public bool IsClaudeWeeklyExhaustionRisk => _claudeWeeklyForecast?.Status == WeeklyForecastCalculator.RiskStatus;
+    private WeeklyForecast? ClaudeForecast(string period)
+    {
+        var window = ProfileEngagementPolicy.Find(AgentProvider.Claude, ClaudeWindows, period);
+        return window is { HasUsage: true } && _claudeReceivedAt is { } receivedAt
+            ? WeeklyForecastCalculator.Calculate(window, receivedAt, _rateHistory.For(window))
+            : null;
+    }
 
     public void SetProfileColors(string theme, string codex, string claude)
     {
@@ -131,6 +146,7 @@ public sealed partial class MainViewModel
     {
         _claudeSnapshot = snapshot?.Windows ?? [];
         _claudeReceivedAt = snapshot?.ReceivedAt;
+        if (snapshot is not null) _rateHistory.Record(snapshot.Windows, snapshot.ReceivedAt);
         _claudeState = state; _claudeStale = stale;
         RefreshProfilePresentation();
     }
@@ -159,6 +175,8 @@ public sealed partial class MainViewModel
     {
         _profileGauges = ProfileEngagementPolicy.Select(_codexActivity, _claudeActivity, _lastProfile, _compactQuotaDisplay, CodexWindows, ClaudeWindows);
         _expiredQuotaCount = CountExpiredQuotas();
+        _claudeFiveHourForecast = ClaudeForecast("5h");
+        _claudeWeeklyForecast = ClaudeForecast("7d");
         NotifyProfileProperties();
     }
     private int CountExpiredQuotas()
@@ -188,6 +206,8 @@ public sealed partial class MainViewModel
             nameof(ClaudeFiveHour), nameof(ClaudeWeekly), nameof(ClaudeFiveHourReset), nameof(ClaudeWeeklyReset),
             nameof(ClaudeFiveHourRemainingPercent), nameof(ClaudeWeeklyRemainingPercent),
             nameof(ClaudeFiveHourAccessibleName), nameof(ClaudeWeeklyAccessibleName),
+            nameof(ClaudeFiveHourForecast), nameof(ClaudeWeeklyForecast), nameof(HasClaudeFiveHourForecast), nameof(HasClaudeWeeklyForecast),
+            nameof(IsClaudeFiveHourExhaustionRisk), nameof(IsClaudeWeeklyExhaustionRisk),
             nameof(IsClaudeConnected), nameof(IsClaudeReconnectRequired), nameof(ClaudeConnectLabel), nameof(ClaudeConnectionHint) })
             PropertyChanged?.Invoke(this, new(name));
         NotifyClaudeActions();

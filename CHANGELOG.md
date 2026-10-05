@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.30.0] - 2026-10-05
+
+### Added
+
+- Each Claude quota window (5h and 7d) now shows its own usage forecast under the reset countdown, with the same red emphasis as the Codex weekly forecast when the quota risks running out before the reset. It stays hidden while Claude is disconnected or a window has no current data.
+- A forecast at risk now also says around when the quota runs out (for example "esgota por volta de 16:40").
+
+### Changed
+
+- The quota forecast no longer relies only on the cycle-average pace. When the app has watched a window for a full recent period (1 hour for 5h windows, 24 hours for weekly ones, so day and night are both included), the recent rate is blended with the cycle average, so a sprint or a pause is reflected within the hour instead of only after days. Without that history it falls back to the cycle-average pace used by popular trackers such as CodexBar.
+- No projection is offered in the first 5% of a window (15 minutes for 5h, about 8 hours for 7d) unless 20% or more is already used, avoiding alarming extrapolations from a few early minutes.
+- Recent readings are kept only in memory, bounded per window and throttled while unchanged; no extra polling, timers or disk writes were added.
+
+
 ## [0.29.9] - 2026-10-04
 
 ### Changed

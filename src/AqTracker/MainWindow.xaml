@@ -374,6 +374,21 @@
                   <StackPanel Grid.Column="1" VerticalAlignment="Center" Margin="11,0,0,0">
                     <TextBlock Text="{DynamicResource Loc.FiveHourWindow}" FontSize="10" FontWeight="SemiBold" Foreground="{DynamicResource SoftInk}" />
                     <TextBlock Text="{Binding ClaudeFiveHourReset}" FontFamily="./assets/fonts/#Source Sans 3" TextWrapping="Wrap" FontSize="10" Foreground="{DynamicResource SoftInk}" Margin="0,3,0,0" />
+                    <TextBlock x:Name="ClaudeFiveHourForecastText" Text="{Binding ClaudeFiveHourForecast}" FontFamily="./assets/fonts/#Source Sans 3" FontSize="10" TextWrapping="Wrap" Margin="0,3,0,0"
+                               Visibility="{Binding HasClaudeFiveHourForecast, Converter={StaticResource BooleanToVisibility}}">
+                      <TextBlock.Style>
+                        <Style TargetType="TextBlock">
+                          <Setter Property="Foreground" Value="{DynamicResource SoftInk}" />
+                          <Setter Property="FontWeight" Value="Normal" />
+                          <Style.Triggers>
+                            <DataTrigger Binding="{Binding IsClaudeFiveHourExhaustionRisk}" Value="True">
+                              <Setter Property="Foreground" Value="{DynamicResource RiskWarning}" />
+                              <Setter Property="FontWeight" Value="Bold" />
+                            </DataTrigger>
+                          </Style.Triggers>
+                        </Style>
+                      </TextBlock.Style>
+                    </TextBlock>
                   </StackPanel>
                 </Grid>
                 <Grid x:Name="DetailedClaudeWeeklyQuota" Margin="0,3,0,13">
@@ -388,6 +403,21 @@
                   <StackPanel Grid.Column="1" VerticalAlignment="Center" Margin="11,0,0,0">
                     <TextBlock Text="{DynamicResource Loc.Weekly}" FontSize="10" FontWeight="SemiBold" Foreground="{DynamicResource SoftInk}" />
                     <TextBlock Text="{Binding ClaudeWeeklyReset}" FontFamily="./assets/fonts/#Source Sans 3" TextWrapping="Wrap" FontSize="10" Foreground="{DynamicResource SoftInk}" Margin="0,3,0,0" />
+                    <TextBlock x:Name="ClaudeWeeklyForecastText" Text="{Binding ClaudeWeeklyForecast}" FontFamily="./assets/fonts/#Source Sans 3" FontSize="10" TextWrapping="Wrap" Margin="0,3,0,0"
+                               Visibility="{Binding HasClaudeWeeklyForecast, Converter={StaticResource BooleanToVisibility}}">
+                      <TextBlock.Style>
+                        <Style TargetType="TextBlock">
+                          <Setter Property="Foreground" Value="{DynamicResource SoftInk}" />
+                          <Setter Property="FontWeight" Value="Normal" />
+                          <Style.Triggers>
+                            <DataTrigger Binding="{Binding IsClaudeWeeklyExhaustionRisk}" Value="True">
+                              <Setter Property="Foreground" Value="{DynamicResource RiskWarning}" />
+                              <Setter Property="FontWeight" Value="Bold" />
+                            </DataTrigger>
+                          </Style.Triggers>
+                        </Style>
+                      </TextBlock.Style>
+                    </TextBlock>
                   </StackPanel>
                 </Grid>
               </StackPanel>

@@ -179,6 +179,7 @@ public sealed partial class MainViewModel : INotifyPropertyChanged
     private UsageAnalytics? _lastAnalytics;
     private QuotaWindow? _lastWeekly;
     private WeeklyForecast? _lastForecast;
+    private readonly QuotaRateHistory _rateHistory = new();
     private bool _hasQuotaSnapshot;
     private (DateTimeOffset Start, DateTimeOffset End)? _activeQuotaCycle;
     private RankingPeriod _rankingPeriod = RankingPeriod.Month;
@@ -416,7 +417,8 @@ public sealed partial class MainViewModel : INotifyPropertyChanged
         _hasQuotaSnapshot = true;
         UpdateActiveQuotaCycle(weekly);
         ApplyWeeklyDisplay(weekly);
-        ApplyForecast(WeeklyForecastCalculator.Calculate(weekly, snapshot.ReceivedAt));
+        _rateHistory.Record(snapshot.Windows, snapshot.ReceivedAt);
+        ApplyForecast(WeeklyForecastCalculator.Calculate(weekly, snapshot.ReceivedAt, _rateHistory.For(weekly)));
         RefreshDailyQuotaSeries(weekly, snapshot.ReceivedAt);
         Status = weekly is null ? LocalizationManager.Text("NoLiveData") : LocalizationManager.Text("LiveData");
     }
@@ -450,7 +452,8 @@ public sealed partial class MainViewModel : INotifyPropertyChanged
         _hasAnalytics = true;
         if (currencyCode is not null) CurrencyCode = CurrencyPresentation.Normalize(currencyCode);
         RefreshFormattedCosts();
-        ApplyForecast(WeeklyForecastCalculator.Calculate(weekly, snapshot.ReceivedAt));
+        _rateHistory.Record(snapshot.Windows, snapshot.ReceivedAt);
+        ApplyForecast(WeeklyForecastCalculator.Calculate(weekly, snapshot.ReceivedAt, _rateHistory.For(weekly)));
         RefreshRanking();
         Status = weekly is null ? LocalizationManager.Text("NoLiveData") : LocalizationManager.Text("LiveData");
     }
@@ -593,11 +596,17 @@ public sealed partial class MainViewModel : INotifyPropertyChanged
     private void ApplyForecast(WeeklyForecast forecast)
     {
         _lastForecast = forecast;
-        IsExhaustionRisk = forecast.Status == "Risco de esgotar antes do reset";
+        IsExhaustionRisk = forecast.Status == WeeklyForecastCalculator.RiskStatus;
+        Forecast = FormatForecast(forecast);
+    }
+    private string FormatForecast(WeeklyForecast forecast)
+    {
         var status = LocalizationManager.TranslateKnown(forecast.Status);
-        Forecast = forecast.ProjectedPercent is double projected
-            ? LocalizationManager.Format("ProjectedForecast", status, WeeklyForecastCalculator.FormatProjectedPercent(projected, LocalizationManager.CurrentLanguageCode))
-            : status;
+        if (forecast.ProjectedPercent is not double projected) return status;
+        var text = LocalizationManager.Format("ProjectedForecast", status, WeeklyForecastCalculator.FormatProjectedPercent(projected, LocalizationManager.CurrentLanguageCode));
+        return forecast.Status == WeeklyForecastCalculator.RiskStatus && forecast.ExhaustsAt is { } exhausts
+            ? text + " · " + LocalizationManager.Format("ExhaustsAround", WeeklyForecastCalculator.FormatExhaustsAt(exhausts, _clock(), LocalizationManager.CurrentLanguageCode))
+            : text;
     }
     private void UpdateActiveQuotaCycle(QuotaWindow? weekly)
     {
