@@ -56,7 +56,7 @@ public sealed class ClaudeUsageClient : IDisposable
     /// <summary>A snapshot older than this is reported as stale even when no poll reported a failure.</summary>
     public static readonly TimeSpan MaxSnapshotAge = TimeSpan.FromMinutes(5);
     private int _failures, _unreadableLoads, _networkFailures, _failureCount;
-    private bool _credentialsUnreadable, _stale = true, _stuckReported;
+    private bool _credentialsUnreadable, _stale = true, _stuckReported, _skipIPv6 = true;
     private DateTimeOffset _nextAttempt, _inFlightSince, _lastFailureLoggedAt;
     private string? _lastFailure;
     public ClaudeConnectionState State { get; private set; }
@@ -181,6 +181,7 @@ public sealed class ClaudeUsageClient : IDisposable
     {
         using var request = new HttpRequestMessage(HttpMethod.Post, ClaudeOAuthConstants.TokenUrl)
         { Content = new StringContent(JsonSerializer.Serialize(payload), Encoding.UTF8, "application/json") };
+        PrepareConnection(request);
         using var response = await _http.SendAsync(request, cancellationToken).ConfigureAwait(false);
         if ((int)response.StatusCode == 429 || (int)response.StatusCode >= 500) throw new TransientClaudeException((int)response.StatusCode, RetryAfter(response));
         if (!response.IsSuccessStatusCode) throw new ClaudeAuthenticationException();
@@ -201,6 +202,7 @@ public sealed class ClaudeUsageClient : IDisposable
         request.Headers.Add("anthropic-beta", "oauth-2025-04-20");
         request.Headers.UserAgent.ParseAdd("aq-tracker/" + _version);
         var elapsed = System.Diagnostics.Stopwatch.StartNew();
+        PrepareConnection(request);
         var response = await _http.SendAsync(request, cancellationToken).ConfigureAwait(false);
         if (elapsed.Elapsed >= SlowRequest && DateTimeOffset.UtcNow - _lastSlowLoggedAt >= RepeatFailureLogInterval)
         {
@@ -246,12 +248,20 @@ public sealed class ClaudeUsageClient : IDisposable
     // Repeated network failures can come from a pooled connection broken by sleep or a network change; start a fresh pool.
     private void NoteNetworkFailure()
     {
-        if (++_networkFailures < NetworkFailuresBeforeNewConnection || _handler is not null) return;
+        if (_handler is not null) return;
+        // Whichever address family is preferred just failed: try the other one on the next attempt.
+        _skipIPv6 = !_skipIPv6;
+        SanitizedLogger.Write(_skipIPv6 ? "Claude connections now skip IPv6." : "Claude connections now allow IPv6 (IPv4 failed).");
+        if (++_networkFailures < NetworkFailuresBeforeNewConnection) return;
         _networkFailures = 0;
         var previous = _http;
         _http = CreateHttpClient();
         previous.Dispose();
         SanitizedLogger.Write("Claude HTTP connection recreated after repeated network failures.");
+    }
+    private void PrepareConnection(HttpRequestMessage request)
+    {
+        if (_handler is null && request.RequestUri is { } uri) IPv4FirstConnections.Apply(uri, _skipIPv6);
     }
     private HttpClient CreateHttpClient()
     {

@@ -1870,6 +1870,11 @@ try
     }
     Assert(ClaudeUsageClient.RequestTimeout > TimeSpan.FromSeconds(21) + TimeSpan.FromSeconds(10),
         "the Claude request timeout leaves room for .NET Framework's IPv4 fallback after a ~21 s unreachable-IPv6 connect");
+    var refusedIPv6 = false;
+    try { IPv4FirstConnections.SkipIPv6(null!, new IPEndPoint(IPAddress.IPv6Loopback, 443), 0); }
+    catch (System.Net.Sockets.SocketException error) { refusedIPv6 = error.SocketErrorCode == System.Net.Sockets.SocketError.AddressFamilyNotSupported; }
+    Assert(refusedIPv6 && IPv4FirstConnections.SkipIPv6(null!, new IPEndPoint(IPAddress.Loopback, 443), 0) is null,
+        "IPv4-first connections refuse IPv6 endpoints so .NET Framework moves on to IPv4 without the 21 s connect timeout, and leave IPv4 binding to the default");
     var hungNow = claudeTestNow;
     using (var hungClient = new ClaudeUsageClient(new TestClaudeTokenStore(originalTokens), Path.Combine(claudeFixtureRoot, "hung.json"), "0.30.2",
         new HangOnceHttpHandler(JsonResponse(HttpStatusCode.OK, """{"five_hour":{"utilization":40,"resets_at":null}}""")), () => hungNow, TimeSpan.FromMilliseconds(300)))

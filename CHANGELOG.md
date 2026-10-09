@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.30.3] - 2026-10-08
+
+### Fixed
+
+- Claude connections now try IPv4 first. On networks where `api.anthropic.com` advertises an unreachable IPv6 address, every new connection used to wait ~22 s for the IPv6 attempt to time out before falling back; it now connects in well under a second. If IPv4 itself fails, the next attempt allows IPv6 again, so IPv6-only networks keep working.
+
 ## [0.30.2] - 2026-10-08
 
 ### Fixed
