@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.30.2] - 2026-10-08
+
+### Fixed
+
+- The Claude quota stopped updating on networks where `api.anthropic.com` advertises IPv6 but IPv6 is unreachable. .NET Framework only falls back to IPv4 after the ~21 s TCP connect timeout, and the 20 s request timeout aborted every new connection just before that. Claude requests now allow 60 s, and a slow request is logged.
+- The Claude quota could freeze on an old reading while still looking current, with nothing in the log. Every failed usage poll is now logged with its reason (HTTP status, network error or timeout), any unsuccessful answer backs off instead of retrying silently every minute, a `429` honors `Retry-After`, each refresh has a hard deadline so a request that never answers cannot block later polls, and repeated network failures start a fresh HTTP connection pool.
+- A Claude reading older than five minutes is shown as stale (with the time of the data) even when no failure was reported, so a quota that stopped refreshing can no longer pass as up to date.
+
 ## [0.30.1] - 2026-10-05
 
 ### Fixed

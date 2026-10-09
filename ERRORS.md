@@ -1,5 +1,14 @@
 # Erros e solucoes conhecidas
 
+## Percentual do Claude congelado sem nenhum erro no log (0.30.2)
+
+- **Sintoma (2026-10-08):** o widget mostrava o percentual do Claude parado (5h = 55% as 19:47) enquanto a API ja retornava 84%; agentes Claude continuavam aparecendo. Estado `Connected`, token valido (expira 00:09) e nenhuma linha `Claude ...` no log durante mais de uma hora, embora o timer chamasse `RefreshClaudeAsync` a cada minuto.
+- **Causa raiz:** `api.anthropic.com` resolve primeiro para IPv6 (`2607:6bc0::10`), que nesta rede nao conecta. O .NET Framework tenta os enderecos em sequencia e so cai para IPv4 depois do timeout TCP de ~21 s; o `HttpClient.Timeout` de 20 s abortava toda conexao nova logo antes do fallback. Enquanto havia conexao no pool funcionava; quando ela caiu, toda consulta passou a dar timeout para sempre. Reproduzido: `HttpClient` no PowerShell 5.1 = 200 em 21,4 s; TCP para IPv6 falha em 21 s, IPv4 conecta em 17 ms.
+- **Causa do silencio:** `ClaudeUsageClient.RefreshAsync` tinha caminhos de falha sem log: timeout e `429`/`5xx` (backoff sem log), outro status nao-2xx (stale sem log e sem backoff) e gate ocupado. `IsStale` so mudava quando uma falha era reportada.
+- **Solucao:** timeout por requisicao de 60 s (`RequestTimeout`) e log quando uma requisicao leva >= 10 s; toda falha e logada com motivo (`usage HTTP <status>`, `network ...`, `timeout`), repeticao limitada a cada 30 min e linha de recuperacao; qualquer nao-2xx faz backoff; `429` respeita `Retry-After` (ate 1 h); prazo total por refresh de 3x60+15 s (gate nunca fica preso; refresh preso alem de 2x o prazo e logado); 2 falhas de rede seguidas recriam o `HttpClient`; `IsStale` considera idade > 5 min. Com a 0.30.2 inicial (timeout ainda 20 s) o log mostrou `Claude usage refresh failed (timeout)`, que levou a causa raiz.
+- **Diagnostico:** leia o log e os dados reais via `\\localhost\C$\Users\<user>\AppData\...` — o caminho UNC contorna a virtualizacao de AppData do shell do Claude desktop (o caminho normal mostra copias paradas em 05/10). Para checar a API sem tocar no app: decifrar `claude-tokens.dat` com DPAPI (CurrentUser) e fazer um GET em `/api/oauth/usage` sem imprimir o token.
+- **Prevencao:** nenhum caminho de falha de rede pode retornar sem log; dado com idade precisa virar "desatualizado" por idade, nao so por erro reportado. Em .NET Framework, nunca use timeout de requisicao HTTP <= ~25 s para hosts com AAAA: IPv6 quebrado consome 21 s antes do fallback IPv4. Teste rapido: `TcpClient.ConnectAsync` para cada endereco de `Dns.GetHostAddresses`.
+
 ## Pop-up "taskkill.exe - Erro de aplicativo (0xc0000142)" ao desligar/reiniciar o Windows
 
 - **Sintoma:** as vezes, ao desligar ou reiniciar, aparecia o pop-up `taskkill.exe - O aplicativo nao pode ser inicializado corretamente (0xc0000142)`. No log System: evento 26 (Application Popup) no mesmo segundo do evento 1074 de desligamento.

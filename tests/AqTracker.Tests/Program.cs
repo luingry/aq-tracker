@@ -1848,6 +1848,41 @@ try
             backoffNow = backoffClient.NextAttemptAt;
         }
     }
+    var limitedNow = claudeTestNow;
+    var limitedHandler = new TestHttpHandler((_, _) =>
+    {
+        var limited = JsonResponse((HttpStatusCode)429, "{}");
+        limited.Headers.RetryAfter = new System.Net.Http.Headers.RetryConditionHeaderValue(TimeSpan.FromMinutes(15));
+        return Task.FromResult(limited);
+    });
+    using (var limitedClient = new ClaudeUsageClient(new TestClaudeTokenStore(originalTokens), Path.Combine(claudeFixtureRoot, "limited.json"), "0.30.2", limitedHandler, () => limitedNow))
+    {
+        await limitedClient.RefreshAsync(CancellationToken.None);
+        Assert(limitedClient.NextAttemptAt == limitedNow.AddMinutes(15) && limitedClient.IsStale, "a 429 honors Retry-After instead of hammering the usage endpoint every minute");
+    }
+    var forbiddenHandler = new TestHttpHandler((_, _) => Task.FromResult(JsonResponse(HttpStatusCode.Forbidden, "{}")));
+    using (var forbiddenClient = new ClaudeUsageClient(new TestClaudeTokenStore(originalTokens), Path.Combine(claudeFixtureRoot, "forbidden.json"), "0.30.2", forbiddenHandler, () => claudeTestNow))
+    {
+        await forbiddenClient.RefreshAsync(CancellationToken.None);
+        await forbiddenClient.RefreshAsync(CancellationToken.None);
+        Assert(forbiddenClient.IsStale && forbiddenClient.NextAttemptAt == claudeTestNow.AddSeconds(60) && forbiddenHandler.Calls == 1 && forbiddenClient.State == ClaudeConnectionState.Connected,
+            "other unsuccessful usage answers back off and mark the quota stale instead of retrying silently every minute");
+    }
+    Assert(ClaudeUsageClient.RequestTimeout > TimeSpan.FromSeconds(21) + TimeSpan.FromSeconds(10),
+        "the Claude request timeout leaves room for .NET Framework's IPv4 fallback after a ~21 s unreachable-IPv6 connect");
+    var hungNow = claudeTestNow;
+    using (var hungClient = new ClaudeUsageClient(new TestClaudeTokenStore(originalTokens), Path.Combine(claudeFixtureRoot, "hung.json"), "0.30.2",
+        new HangOnceHttpHandler(JsonResponse(HttpStatusCode.OK, """{"five_hour":{"utilization":40,"resets_at":null}}""")), () => hungNow, TimeSpan.FromMilliseconds(300)))
+    {
+        var refresh = hungClient.RefreshAsync(CancellationToken.None);
+        Assert(await Task.WhenAny(refresh, Task.Delay(TimeSpan.FromSeconds(10))) == refresh, "a usage request that never answers is abandoned at the refresh deadline");
+        Assert(hungClient.IsStale && hungClient.NextAttemptAt == hungNow.AddSeconds(60), "an abandoned request backs off and marks the quota stale");
+        hungNow = hungClient.NextAttemptAt;
+        await hungClient.RefreshAsync(CancellationToken.None);
+        Assert(!hungClient.IsStale && hungClient.Snapshot!.Windows.Single().UsedPercent == 40, "the next poll after a hung request is not blocked and publishes fresh quota");
+        hungNow = hungNow.Add(ClaudeUsageClient.MaxSnapshotAge).AddSeconds(1);
+        Assert(hungClient.IsStale, "a quota that stopped refreshing becomes stale by age even without a reported failure");
+    }
     using (var disconnectClient = new ClaudeUsageClient(new TestClaudeTokenStore(originalTokens), usagePath, "0.22.0", new TestHttpHandler((_, _) => Task.FromResult(JsonResponse(HttpStatusCode.OK, "{}"))), () => claudeTestNow))
     {
         await disconnectClient.DisconnectAsync();
@@ -2536,6 +2571,16 @@ sealed class TestClaudeTokenStore(ClaudeTokens? initial = null) : IClaudeTokenSt
     public void Save(ClaudeTokens tokens) => _tokens = tokens;
     public void Delete() => _tokens = null;
     public bool HasStoredCredentials() => _tokens is not null;
+}
+/// <summary>First request never answers on its own (only the caller's cancellation ends it); later requests succeed.</summary>
+sealed class HangOnceHttpHandler(HttpResponseMessage success) : HttpMessageHandler
+{
+    private int _calls;
+    protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+    {
+        if (++_calls == 1) await Task.Delay(Timeout.Infinite, cancellationToken);
+        return success;
+    }
 }
 sealed class TestHttpHandler(Func<HttpRequestMessage, int, Task<HttpResponseMessage>> respond) : HttpMessageHandler
 {
