@@ -189,18 +189,18 @@ using (var unreadableClient = new ClaudeUsageClient(unreadableStore, Path.Combin
     new TestHttpHandler((_, _) => Task.FromResult(new HttpResponseMessage(HttpStatusCode.InternalServerError))), () => unreadableNow))
 {
     Assert(unreadableClient.State == ClaudeConnectionState.Disconnected, "credentials that cannot be read at startup start out disconnected");
-    for (var attempt = 0; attempt < 2; attempt++) { await unreadableClient.RefreshAsync(CancellationToken.None); unreadableNow = unreadableNow.AddSeconds(61); }
+    for (var attempt = 0; attempt < 2; attempt++) { await unreadableClient.RefreshAsync(CancellationToken.None); unreadableNow = unreadableNow.Add(ClaudeUsageClient.MaxBackoff).AddSeconds(1); }
     Assert(unreadableClient.State == ClaudeConnectionState.Disconnected, "a couple of unreadable loads are still treated as transient");
     await unreadableClient.RefreshAsync(CancellationToken.None);
     Assert(unreadableClient.State == ClaudeConnectionState.Reconnect && unreadableClient.IsStale, "credentials present on disk that keep failing to load surface as reconnect required instead of a silent stale snapshot");
-    unreadableStore.Unreadable = false; unreadableNow = unreadableNow.AddSeconds(61);
+    unreadableStore.Unreadable = false; unreadableNow = unreadableNow.Add(ClaudeUsageClient.MaxBackoff).AddSeconds(1);
     await unreadableClient.RefreshAsync(CancellationToken.None);
     Assert(unreadableClient.State == ClaudeConnectionState.Connected, "readable credentials recover from the unreadable state without another sign-in");
 }
 var absentStore = new TestClaudeTokenStore();
 using (var absentClient = new ClaudeUsageClient(absentStore, Path.Combine(Path.GetTempPath(), "aq-absent-" + Guid.NewGuid() + ".json"), "0.29.7", new TestHttpHandler((_, _) => Task.FromResult(new HttpResponseMessage(HttpStatusCode.InternalServerError))), () => unreadableNow))
 {
-    for (var attempt = 0; attempt < 5; attempt++) { await absentClient.RefreshAsync(CancellationToken.None); unreadableNow = unreadableNow.AddSeconds(61); }
+    for (var attempt = 0; attempt < 5; attempt++) { await absentClient.RefreshAsync(CancellationToken.None); unreadableNow = unreadableNow.Add(ClaudeUsageClient.MaxBackoff).AddSeconds(1); }
     Assert(absentClient.State == ClaudeConnectionState.Disconnected, "a genuinely signed-out account never asks to reconnect");
 }
 Assert(mainWindowSource.Contains("_startupAnalytics.BeginConnection();", StringComparison.Ordinal) && mainWindowSource.Contains("_startupAnalytics.IsCurrent(connectionGeneration)", StringComparison.Ordinal), "new app-server clients invalidate previous callbacks before asynchronous discovery and recheck generation on the dispatcher");
@@ -1835,18 +1835,72 @@ try
         Assert(retryRejected.State == ClaudeConnectionState.Reconnect && retryRejectedStore.Load() is null, "401 after successful token refresh disconnects without looping");
     }
     var backoffNow = claudeTestNow;
-    var backoffHandler = new TestHttpHandler((_, call) => Task.FromResult(JsonResponse(call % 2 == 1 ? (HttpStatusCode)429 : HttpStatusCode.ServiceUnavailable, "{}")));
+    var backoffHandler = new TestHttpHandler((_, _) => Task.FromResult(JsonResponse(HttpStatusCode.ServiceUnavailable, "{}")));
     using (var backoffClient = new ClaudeUsageClient(new TestClaudeTokenStore(originalTokens), Path.Combine(claudeFixtureRoot, "backoff.json"), "0.22.0", backoffHandler, () => backoffNow))
     {
-        foreach (var seconds in new[] { 60, 120, 240, 480, 600, 600 })
+        foreach (var seconds in new[] { 20, 40, 80, 120, 120, 120 })
         {
             await backoffClient.RefreshAsync(CancellationToken.None);
-            Assert(backoffClient.NextAttemptAt == backoffNow.AddSeconds(seconds) && backoffClient.IsStale, "429/5xx exponential backoff caps at ten minutes");
+            Assert(backoffClient.NextAttemptAt == backoffNow.AddSeconds(seconds) && backoffClient.IsStale, "5xx backoff starts at the 20 s poll and caps at two minutes");
             var calls = backoffHandler.Calls;
             await backoffClient.RefreshAsync(CancellationToken.None, onlyIfStale: true);
             Assert(backoffHandler.Calls == calls, "engagement honors backoff");
             backoffNow = backoffClient.NextAttemptAt;
         }
+    }
+    var cadenceNow = claudeTestNow;
+    var cadencePath = Path.Combine(claudeFixtureRoot, "cadence.json");
+    var cadenceHandler = new TestHttpHandler((_, call) => Task.FromResult(call == 2
+        ? JsonResponse((HttpStatusCode)429, "{}")
+        : JsonResponse(HttpStatusCode.OK, """{"five_hour":{"utilization":30,"resets_at":null}}""")));
+    using (var cadenceClient = new ClaudeUsageClient(new TestClaudeTokenStore(originalTokens), cadencePath, "0.30.4", cadenceHandler, () => cadenceNow))
+    {
+        Assert(ClaudeUsageClient.PollInterval == TimeSpan.FromSeconds(20) && mainWindowSource.Contains("Interval = ClaudeUsageClient.PollInterval", StringComparison.Ordinal),
+            "the Claude quota has its own 20 s poll timer instead of riding the 60 s Codex refresh");
+        await cadenceClient.RefreshAsync(CancellationToken.None);
+        var written = File.GetLastWriteTimeUtc(cadencePath);
+        cadenceNow = cadenceNow.AddSeconds(20);
+        await cadenceClient.RefreshAsync(CancellationToken.None);
+        Assert(!cadenceClient.IsStale && cadenceClient.Snapshot!.Windows.Single().UsedPercent == 30,
+            "one sporadic 429 between good polls keeps the fresh reading instead of flashing it as outdated");
+        cadenceNow = cadenceClient.NextAttemptAt.AddMilliseconds(-500);
+        await cadenceClient.RefreshAsync(CancellationToken.None);
+        Assert(cadenceHandler.Calls == 3 && cadenceClient.Snapshot!.ReceivedAt == cadenceNow,
+            "a timer tick landing a moment before the scheduled retry still polls instead of waiting a whole extra tick");
+        Assert(File.GetLastWriteTimeUtc(cadencePath) == written, "an unchanged reading is not rewritten to disk on every 20 s poll");
+        cadenceNow = cadenceNow.Add(ClaudeUsageClient.MaxSnapshotAge).AddSeconds(1);
+        Assert(cadenceClient.IsStale, "a reading older than three minutes is reported as stale");
+    }
+    // The endpoint has a request budget: model it as "every other request is limited" and check the pace adapts both ways.
+    var paceNow = claudeTestNow;
+    var budgetSpent = true;
+    var paceHandler = new TestHttpHandler((_, _) => Task.FromResult(budgetSpent
+        ? JsonResponse((HttpStatusCode)429, "{}")
+        : JsonResponse(HttpStatusCode.OK, """{"five_hour":{"utilization":50,"resets_at":null}}""")));
+    using (var paceClient = new ClaudeUsageClient(new TestClaudeTokenStore(originalTokens), Path.Combine(claudeFixtureRoot, "pace.json"), "0.30.4", paceHandler, () => paceNow))
+    {
+        foreach (var seconds in new[] { 40, 60, 80, 100, 120, 120 })
+        {
+            await paceClient.RefreshAsync(CancellationToken.None);
+            Assert(paceClient.Pace == TimeSpan.FromSeconds(seconds) && paceClient.NextAttemptAt == paceNow.AddSeconds(seconds),
+                "each 429 slows the poll by one 20 s tick, capped at two minutes, instead of doubling up to ten");
+            paceNow = paceClient.NextAttemptAt;
+        }
+        budgetSpent = false;
+        for (var success = 1; success <= 15; success++)
+        {
+            await paceClient.RefreshAsync(CancellationToken.None);
+            Assert(paceClient.NextAttemptAt == paceNow + paceClient.Pace, "a successful poll schedules the next one at the current pace");
+            paceNow = paceClient.NextAttemptAt;
+        }
+        Assert(paceClient.Pace == ClaudeUsageClient.PollInterval && !paceClient.IsStale, "consecutive successes speed the pace back up to the 20 s poll");
+        var calls = paceHandler.Calls;
+        paceNow = paceNow.AddSeconds(20);
+        await paceClient.RefreshAsync(CancellationToken.None, idle: true);
+        Assert(paceHandler.Calls == calls, "while Claude is idle a reading younger than a minute is kept so the request budget refills");
+        paceNow = paceNow.AddSeconds(20);
+        await paceClient.RefreshAsync(CancellationToken.None, idle: true);
+        Assert(paceHandler.Calls == calls + 1, "an idle Claude is still polled once a minute");
     }
     var limitedNow = claudeTestNow;
     var limitedHandler = new TestHttpHandler((_, _) =>
@@ -1865,7 +1919,7 @@ try
     {
         await forbiddenClient.RefreshAsync(CancellationToken.None);
         await forbiddenClient.RefreshAsync(CancellationToken.None);
-        Assert(forbiddenClient.IsStale && forbiddenClient.NextAttemptAt == claudeTestNow.AddSeconds(60) && forbiddenHandler.Calls == 1 && forbiddenClient.State == ClaudeConnectionState.Connected,
+        Assert(forbiddenClient.IsStale && forbiddenClient.NextAttemptAt == claudeTestNow.AddSeconds(20) && forbiddenHandler.Calls == 1 && forbiddenClient.State == ClaudeConnectionState.Connected,
             "other unsuccessful usage answers back off and mark the quota stale instead of retrying silently every minute");
     }
     Assert(ClaudeUsageClient.RequestTimeout > TimeSpan.FromSeconds(21) + TimeSpan.FromSeconds(10),
@@ -1881,7 +1935,7 @@ try
     {
         var refresh = hungClient.RefreshAsync(CancellationToken.None);
         Assert(await Task.WhenAny(refresh, Task.Delay(TimeSpan.FromSeconds(10))) == refresh, "a usage request that never answers is abandoned at the refresh deadline");
-        Assert(hungClient.IsStale && hungClient.NextAttemptAt == hungNow.AddSeconds(60), "an abandoned request backs off and marks the quota stale");
+        Assert(hungClient.IsStale && hungClient.NextAttemptAt == hungNow.AddSeconds(20), "an abandoned request backs off and marks the quota stale");
         hungNow = hungClient.NextAttemptAt;
         await hungClient.RefreshAsync(CancellationToken.None);
         Assert(!hungClient.IsStale && hungClient.Snapshot!.Windows.Single().UsedPercent == 40, "the next poll after a hung request is not blocked and publishes fresh quota");

@@ -48,22 +48,38 @@ public sealed class ClaudeUsageClient : IDisposable
     private readonly SemaphoreSlim _gate = new(1, 1);
     private ClaudeTokens? _tokens;
     private const int UnreadableLoadsBeforeReconnect = 3, NetworkFailuresBeforeNewConnection = 2;
-    private static readonly TimeSpan MaxRetryAfter = TimeSpan.FromHours(1), RepeatFailureLogInterval = TimeSpan.FromMinutes(30), SlowRequest = TimeSpan.FromSeconds(10);
+    /// <summary>Fastest cadence of the usage poll (and the app's timer tick).</summary>
+    public static readonly TimeSpan PollInterval = TimeSpan.FromSeconds(20);
+    /// <summary>While Claude is idle the quota barely moves: polling slower lets the endpoint's request budget refill for active periods.</summary>
+    public static readonly TimeSpan IdleInterval = TimeSpan.FromSeconds(60);
+    // The usage endpoint has a request budget (bursts of ~10, refilled roughly once a minute) and answers 429 without
+    // Retry-After once it is spent. A fixed fast poll would turn most requests into 429s, and the old exponential backoff
+    // (up to 10 min per attempt) froze the quota for half an hour. Instead the pace adapts: each 429 slows it by one tick
+    // (up to MaxBackoff) and every few successes speed it up again, so it settles at the fastest rate the server accepts.
+    public static readonly TimeSpan MaxBackoff = TimeSpan.FromMinutes(2), MaxRetryAfter = TimeSpan.FromMinutes(15);
+    private const int SuccessesBeforeSpeedUp = 3;
+    private TimeSpan _pace = PollInterval;
+    private int _successStreak;
+    // Timer ticks land a few ms before or after the scheduled retry; without slack a retry due "now" waits a whole extra tick.
+    private static readonly TimeSpan TickSlack = TimeSpan.FromSeconds(2), PersistInterval = TimeSpan.FromMinutes(5);
+    private static readonly TimeSpan RepeatFailureLogInterval = TimeSpan.FromMinutes(30), SlowRequest = TimeSpan.FromSeconds(10);
     // .NET Framework tries each resolved address in turn: when IPv6 is advertised but unreachable, the IPv4 fallback
     // only starts after the ~21 s TCP connect timeout, so the request timeout must leave room for it.
     public static readonly TimeSpan RequestTimeout = TimeSpan.FromSeconds(60);
     private DateTimeOffset _lastSlowLoggedAt;
     /// <summary>A snapshot older than this is reported as stale even when no poll reported a failure.</summary>
-    public static readonly TimeSpan MaxSnapshotAge = TimeSpan.FromMinutes(5);
+    public static readonly TimeSpan MaxSnapshotAge = TimeSpan.FromMinutes(3);
     private int _failures, _unreadableLoads, _networkFailures, _failureCount;
     private bool _credentialsUnreadable, _stale = true, _stuckReported, _skipIPv6 = true;
-    private DateTimeOffset _nextAttempt, _inFlightSince, _lastFailureLoggedAt;
+    private DateTimeOffset _nextAttempt, _inFlightSince, _lastFailureLoggedAt, _persistedAt;
     private string? _lastFailure;
     public ClaudeConnectionState State { get; private set; }
     public RateLimitSnapshot? Snapshot { get; private set; }
     // Age-based so a poll that silently stops succeeding can never keep old numbers looking current.
     public bool IsStale => _stale || Snapshot is null || _clock() - Snapshot.ReceivedAt > MaxSnapshotAge;
     public DateTimeOffset NextAttemptAt => _nextAttempt;
+    /// <summary>Current interval between usage polls, adapted to the endpoint's rate limit.</summary>
+    public TimeSpan Pace => _pace;
 
     public ClaudeUsageClient(IClaudeTokenStore store, string snapshotPath, string version,
         HttpMessageHandler? handler = null, Func<DateTimeOffset>? clock = null, TimeSpan? refreshDeadline = null)
@@ -110,7 +126,8 @@ public sealed class ClaudeUsageClient : IDisposable
         finally { _gate.Release(); }
     }
 
-    public async Task RefreshAsync(CancellationToken cancellationToken, bool onlyIfStale = false)
+    /// <param name="idle">Claude has no active, foreground or unread work: a reading younger than <see cref="IdleInterval"/> is kept.</param>
+    public async Task RefreshAsync(CancellationToken cancellationToken, bool onlyIfStale = false, bool idle = false)
     {
         if (!await _gate.WaitAsync(0, cancellationToken).ConfigureAwait(false)) { ReportIfStuck(); return; }
         // Hard deadline for the whole refresh (token rotation, usage read and body), so a request that never
@@ -121,7 +138,7 @@ public sealed class ClaudeUsageClient : IDisposable
         _inFlightSince = _clock(); _stuckReported = false;
         try
         {
-            if (_clock() < _nextAttempt) return;
+            if (_clock() + TickSlack < _nextAttempt) return;
             // A sharing/DPAPI failure during sign-in must not permanently disconnect
             // a client whose credentials are still safely persisted on disk.
             if (_tokens is null && (State == ClaudeConnectionState.Disconnected || _credentialsUnreadable))
@@ -130,14 +147,15 @@ public sealed class ClaudeUsageClient : IDisposable
                 if (_tokens is null)
                 {
                     NoteUnreadableCredentials();
-                    _nextAttempt = _clock().AddSeconds(60);
+                    _nextAttempt = _clock() + MaxBackoff;
                     return;
                 }
                 _unreadableLoads = 0; _credentialsUnreadable = false;
                 State = ClaudeConnectionState.Connected;
                 SanitizedLogger.Write("Claude credentials recovered after initial load was unavailable.");
             }
-            if (_tokens is null || onlyIfStale && Snapshot is not null && !IsStale && _clock() - Snapshot.ReceivedAt <= TimeSpan.FromSeconds(60)) return;
+            if (_tokens is null || Snapshot is not null && !IsStale &&
+                (onlyIfStale && _clock() - Snapshot.ReceivedAt <= PollInterval || idle && _clock() - Snapshot.ReceivedAt + TickSlack < IdleInterval)) return;
             var refreshed = false;
             if (_tokens.ExpiresAt - _clock() < TimeSpan.FromMinutes(5))
             {
@@ -215,24 +233,47 @@ public sealed class ClaudeUsageClient : IDisposable
     {
         // Every unsuccessful answer backs off and is logged: polling a 429 every minute only prolongs the limit,
         // and an unlogged failure is how the quota froze without a trace.
+        if ((int)response.StatusCode == 429)
+        {
+            _pace = _pace + PollInterval < MaxBackoff ? _pace + PollInterval : MaxBackoff;
+            _successStreak = 0;
+            var retryAfter = RetryAfter(response);
+            _nextAttempt = _clock() + (retryAfter > _pace ? retryAfter.Value : _pace);
+            Fail("usage HTTP 429", quietFirst: true);
+            return;
+        }
         if (!response.IsSuccessStatusCode)
         {
-            Backoff((int)response.StatusCode == 429 ? RetryAfter(response) : null);
+            Backoff();
             Fail("usage HTTP " + (int)response.StatusCode);
             return;
         }
         using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync().ConfigureAwait(false));
         if (document.RootElement.ValueKind != JsonValueKind.Object) throw new JsonException();
         var snapshot = ClaudeUsageParser.Parse(document.RootElement, _clock());
-        AtomicFile.Write(_snapshotPath, JsonSerializer.SerializeToUtf8Bytes(snapshot));
+        // The cache only seeds the next startup: at a 20 s cadence, skip the flushed disk write while nothing changed.
+        if (Snapshot is null || !Snapshot.Windows.SequenceEqual(snapshot.Windows) || snapshot.ReceivedAt - _persistedAt >= PersistInterval)
+        {
+            AtomicFile.Write(_snapshotPath, JsonSerializer.SerializeToUtf8Bytes(snapshot));
+            _persistedAt = snapshot.ReceivedAt;
+        }
         Snapshot = snapshot; _stale = false; State = ClaudeConnectionState.Connected;
-        _failures = 0; _nextAttempt = default; _networkFailures = 0;
-        if (_lastFailure is not null) SanitizedLogger.Write("Claude usage recovered after " + _failureCount + " failed attempt(s).");
+        _failures = 0; _networkFailures = 0;
+        if (++_successStreak >= SuccessesBeforeSpeedUp && _pace > PollInterval)
+        {
+            _pace -= PollInterval; _successStreak = 0;
+            if (_pace == PollInterval) SanitizedLogger.Write("Claude usage back to the " + (int)PollInterval.TotalSeconds + "s poll.");
+        }
+        _nextAttempt = _clock() + _pace;
+        // A lone 429 is routine while the pace settles; only a longer outage earns a recovery line.
+        if (_lastFailure is not null && _failureCount > 1)
+            SanitizedLogger.Write("Claude usage recovered after " + _failureCount + " failed attempt(s); pace " + (int)_pace.TotalSeconds + "s.");
         _lastFailure = null; _failureCount = 0;
     }
-    private void Fail(string reason)
+    private void Fail(string reason, bool quietFirst = false)
     {
         _failureCount++;
+        if (quietFirst && _failureCount == 1) { _lastFailure = reason; _lastFailureLoggedAt = default; return; }
         var now = _clock();
         if (reason == _lastFailure && now - _lastFailureLoggedAt < RepeatFailureLogInterval) return;
         _lastFailure = reason; _lastFailureLoggedAt = now;
@@ -289,10 +330,12 @@ public sealed class ClaudeUsageClient : IDisposable
         _credentialsUnreadable = true; _stale = true; State = ClaudeConnectionState.Reconnect;
         SanitizedLogger.Write("Claude credentials exist but cannot be read after " + _unreadableLoads + " attempts; reconnect required.");
     }
+    // A transient failure does not mark the quota stale by itself: the reading keeps its value until it ages past
+    // MaxSnapshotAge, so one sporadic 429 between two good polls does not flash "outdated".
     private void Backoff(TimeSpan? retryAfter = null)
     {
-        _stale = true; _failures = Math.Min(_failures + 1, 5);
-        var delay = TimeSpan.FromSeconds(Math.Min(600, 60 * Math.Pow(2, _failures - 1)));
+        _failures = Math.Min(_failures + 1, 4);
+        var delay = TimeSpan.FromTicks(Math.Min(MaxBackoff.Ticks, PollInterval.Ticks << (_failures - 1)));
         _nextAttempt = _clock() + (retryAfter > delay ? retryAfter.Value : delay);
     }
     private void RequireReconnect()

@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.30.4] - 2026-10-10
+
+### Fixed
+
+- The Claude quota could stay frozen for half an hour. The usage endpoint has a request budget and answers `429` (without `Retry-After`) once it is spent; each one doubled the wait up to 10 minutes (60 s, 2, 4, 8, 10 min), so five in a row left the quota unchanged from 12:36 to 13:05. A `429` now slows the poll by one 20 s step (at most 2 minutes between polls) and every three successes speed it up again, so it settles at the fastest rate the server accepts. Network errors and `5xx` retry after 20 s, doubling to at most 2 minutes; an explicit `Retry-After` is honored up to 15 minutes.
+- A retry scheduled for "now" could wait a whole extra poll because the timer tick landed a few milliseconds before it; scheduled retries now allow a two-second slack.
+
+### Changed
+
+- The Claude quota now refreshes every 20 seconds on its own timer (instead of every 60 seconds with the Codex refresh) while Claude is working or its window is in use; while Claude is idle it refreshes once a minute so the request budget refills for active periods. Each poll is one small HTTPS request on a pooled connection, the cached reading is only rewritten to disk when it changes (or every 5 minutes), and a lone `429` no longer flashes a fresh reading as outdated or writes a log line; a reading is shown as stale once it is older than 3 minutes.
+
 ## [0.30.3] - 2026-10-08
 
 ### Fixed

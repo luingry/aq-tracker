@@ -13,7 +13,7 @@ public partial class MainWindow
 {
     private readonly ClaudeSessionActivityService _claudeActivity = new();
     private ClaudeUsageClient _claudeClient = null!;
-    private bool _wasClaudeEngaged;
+    private bool _wasClaudeEngaged, _claudeSpendingQuota;
     private string _pendingClaudeAccentColor = "#D97757";
     private CancellationTokenSource? _claudeLoginCancellation;
     private ClaudeOAuthAttempt? _manualClaudeAttempt;
@@ -32,12 +32,12 @@ public partial class MainWindow
     private IReadOnlyList<CompletedAgentWork> VisibleUnreadWorks() => _unreadAgentWorks
         .Where(work => work.Provider == AgentProvider.Codex || _settings.ClaudeProfileEnabled).ToArray();
 
-    private async Task RefreshClaudeAsync(bool onlyIfStale = false)
+    private async Task RefreshClaudeAsync(bool onlyIfStale = false, bool idle = false)
     {
         if (_demo || !_settings.ClaudeProfileEnabled || _shutdown.IsCancellationRequested) return;
         try
         {
-            await _claudeClient.RefreshAsync(_shutdown.Token, onlyIfStale);
+            await _claudeClient.RefreshAsync(_shutdown.Token, onlyIfStale, idle);
             if (!_shutdown.IsCancellationRequested)
                 _viewModel.ApplyClaude(_claudeClient.Snapshot, _claudeClient.State, _claudeClient.IsStale);
         }

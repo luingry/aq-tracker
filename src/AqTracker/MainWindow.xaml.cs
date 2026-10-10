@@ -30,6 +30,7 @@ public partial class MainWindow : Window
     private readonly UpdateController _updates = new();
     private readonly DispatcherTimer _refreshTimer = new() { Interval = TimeSpan.FromSeconds(60) };
     private readonly DispatcherTimer _agentTimer = new() { Interval = TimeSpan.FromSeconds(1) };
+    private readonly DispatcherTimer _claudeTimer = new() { Interval = ClaudeUsageClient.PollInterval };
     private readonly DispatcherTimer _visibilityTimer = new() { Interval = TimeSpan.FromMilliseconds(250) };
     private readonly Dictionary<string, string> _threadTitles = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, DateTimeOffset> _threadTitleLookups = new(StringComparer.OrdinalIgnoreCase);
@@ -153,6 +154,7 @@ public partial class MainWindow : Window
         };
         _refreshTimer.Tick += async (_, _) => await RefreshAsync();
         _agentTimer.Tick += async (_, _) => await RefreshAgentsAsync();
+        _claudeTimer.Tick += async (_, _) => await RefreshClaudeAsync(idle: !_claudeSpendingQuota);
         _visibilityTimer.Tick += (_, _) => { CheckNotificationFocus(); UpdateWidgetVisibility(); };
         CreateTray();
     }
@@ -239,7 +241,6 @@ public partial class MainWindow : Window
     {
         _ = CheckForUpdatesIfDueAsync();
         _viewModel.ReevaluateQuotaExpiry();
-        _ = RefreshClaudeAsync();
         if (_client is null) { await LoadAsync(); return; }
         try
         {
@@ -547,6 +548,7 @@ public partial class MainWindow : Window
         UpdateFloatingOpacity();
         _refreshTimer.Start();
         _agentTimer.Start();
+        _claudeTimer.Start();
         _visibilityTimer.Start();
         _ = LoadAsync();
         _ = RefreshClaudeAsync();
@@ -679,6 +681,8 @@ public partial class MainWindow : Window
         _viewModel.SetProfileActivity(codex, claude);
         if (claude.IsEngaged && !_wasClaudeEngaged) _ = RefreshClaudeAsync(onlyIfStale: true);
         _wasClaudeEngaged = claude.IsEngaged;
+        // Only work in progress or the Claude window in use spends quota; unread completions do not.
+        _claudeSpendingQuota = claude.HasActiveWork || claude.IsForeground && !claude.IsMinimized;
         if (_settings.ShowInNotificationArea) return;
         var shouldShow = WidgetVisibilityPolicy.ShouldShow(
             codex, claude,
@@ -1326,6 +1330,7 @@ public partial class MainWindow : Window
     {
         _refreshTimer.Stop();
         _agentTimer.Stop();
+        _claudeTimer.Stop();
         _visibilityTimer.Stop();
         _shutdown.Cancel();
         CancelClaudeLogin();
