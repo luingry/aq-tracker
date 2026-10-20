@@ -70,15 +70,15 @@ The generated installer is `artifacts\AqTracker-latest.exe`.
 
 `src/AqTracker.Module` packages the tracker as a [SwissTechKnife](https://github.com/luingry/SwissTechKnife) module (`aq-tracker`, activation `startup`). The module is a thin supervisor: it runs the regular app in its own process (`AqTracker.Hosted.exe --hosted --parent <host pid> --data <module data folder>`), so its widget window, SQLite, System.Text.Json 8 and the Codex app-server never share the host's UI thread, assemblies or crashes. The module page shows the status and **Mostrar widget**, **Abrir configurações** and **Atualizar agora**, which replace the tray menu.
 
-Hosted mode differences: settings, Claude tokens, the Claude quota cache and the quota history live in the module's data folder (copied once from `%APPDATA%\AqTracker` on first run; the standalone folder is never modified); no tray icon, update check/install or Run-key auto-start (the host owns them); exits with the host or when the module is disabled (named exit event). Logs and the analytics cache stay in `%LOCALAPPDATA%\AqTracker`. The per-user single-instance mutex is shared, so standalone and hosted never poll together: while a standalone tracker runs, the module waits and takes over when it exits. The module restarts the app after a crash (at most 3 times a minute).
+Hosted mode differences: settings, the Claude quota cache and the quota history live in the module's data folder (copied once from `%APPDATA%\AqTracker` on first run; the standalone folder is never modified). The Claude sign-in is not copied: both modes use the single `%APPDATA%\AqTracker\claude-tokens.dat` (DPAPI, atomic writes). That is safe because the shared mutex keeps them from running together, and refresh-token rotation never invalidates a second copy. Also: no tray icon, update check/install or Run-key auto-start (the host owns them); exits with the host or when the module is disabled (named exit event). Logs and the analytics cache stay in `%LOCALAPPDATA%\AqTracker`. The per-user single-instance mutex is shared, so standalone and hosted never poll together: while a standalone tracker runs, the module waits and takes over when it exits. The module restarts the app after a crash (at most 3 times a minute).
 
-Because Claude refresh tokens rotate, the copied sign-in and the standalone one diverge after the first hosted refresh; going back to the standalone app may require reconnecting Claude.
+Switching between the standalone app and the module keeps the Claude connection; disconnecting Claude in either one signs both out.
 
 ```powershell
 powershell -File scripts/pack-module.ps1   # artifacts\aq-tracker-<VERSION>.zip + sha256/size
 ```
 
-The module version is `VERSION` (stamped into the packaged `module.json`). `src/AqTracker.Module/lib/SwissTechKnife.Sdk.dll` is a compile-only reference copied from a SwissTechKnife build; it is never packaged. Publish the zip, then put its URL, sha256 and size in the host's `catalog/catalog.json`. Every repack changes the hash (zip timestamps), so upload exactly the zip whose hash is in the catalog.
+The module version is `VERSION` (stamped into the packaged `module.json`). `src/AqTracker.Module/lib/SwissTechKnife.Sdk.dll` is a compile-only reference copied from a SwissTechKnife build; it is never packaged. The release workflow builds the package and attaches it to the app release, so the newest release always carries it: `https://github.com/luingry/aq-tracker/releases/download/v<VERSION>/aq-tracker-<VERSION>.zip` (sha256 and size are in the workflow run summary). Put that URL, sha256 and size in the host's `catalog/catalog.json`. Every repack changes the hash (zip timestamps), so use the hash of the released zip, not of a local build.
 
 ## License
 

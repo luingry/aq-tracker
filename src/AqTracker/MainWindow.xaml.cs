@@ -36,6 +36,8 @@ public partial class MainWindow : Window
     private readonly Dictionary<string, DateTimeOffset> _threadTitleLookups = new(StringComparer.OrdinalIgnoreCase);
     private readonly bool _demo;
     private readonly bool _hosted;
+    /// <summary>Claude token file outside the settings folder (hosted mode shares the standalone one); null = beside settings.</summary>
+    private readonly string? _claudeTokensPath;
     private readonly HashSet<string> _observedCompletionIds = new(StringComparer.OrdinalIgnoreCase);
     private readonly List<CompletedAgentWork> _unreadAgentWorks;
     private AppSettings _settings;
@@ -89,9 +91,10 @@ public partial class MainWindow : Window
     [Flags]
     private enum ResizeEdge { None = 0, Left = 1, Top = 2, Right = 4, Bottom = 8 }
 
-    public MainWindow(bool demo = false, SettingsStore? settingsStore = null, bool startMinimized = false, WindowsStartupRegistration? windowsStartup = null, AppSettings? initialSettings = null, bool hosted = false)
+    public MainWindow(bool demo = false, SettingsStore? settingsStore = null, bool startMinimized = false, WindowsStartupRegistration? windowsStartup = null, AppSettings? initialSettings = null, bool hosted = false, string? claudeTokensPath = null)
     {
         _hosted = hosted;
+        _claudeTokensPath = claudeTokensPath;
         _store = settingsStore ?? new();
         _windowsStartup = windowsStartup ?? new WindowsStartupRegistration(RuntimePaths.ExecutablePath);
         _startupHidden = startMinimized;

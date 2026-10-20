@@ -459,7 +459,14 @@ try
     File.WriteAllText(Path.Combine(standaloneData, "claude-tokens.dat"), "dpapi");
     File.WriteAllText(Path.Combine(standaloneData, "claude-quota.json"), "{}");
     File.WriteAllText(Path.Combine(standaloneData, "unrelated.txt"), "x");
-    Assert(HostedMode.MigrateFrom(standaloneData, moduleData) && new SettingsStore(Path.Combine(moduleData, "settings.json")).Load().Theme == "Claro" && File.ReadAllText(Path.Combine(moduleData, "claude-tokens.dat")) == "dpapi" && File.Exists(Path.Combine(moduleData, "claude-quota.json")) && !File.Exists(Path.Combine(moduleData, "unrelated.txt")) && File.Exists(Path.Combine(standaloneData, "settings.json")), "the first hosted run copies the standalone settings, Claude sign-in and quota cache, leaving the standalone folder intact");
+    Assert(HostedMode.MigrateFrom(standaloneData, moduleData) && new SettingsStore(Path.Combine(moduleData, "settings.json")).Load().Theme == "Claro" && File.Exists(Path.Combine(moduleData, "claude-quota.json")) && !File.Exists(Path.Combine(moduleData, "unrelated.txt")) && File.Exists(Path.Combine(standaloneData, "settings.json")), "the first hosted run copies the standalone settings and quota cache, leaving the standalone folder intact");
+    Assert(!File.Exists(Path.Combine(moduleData, "claude-tokens.dat")) && File.ReadAllText(Path.Combine(standaloneData, "claude-tokens.dat")) == "dpapi", "the Claude sign-in is never copied: a second copy would be invalidated by refresh-token rotation");
+    Assert(HostedMode.SharedClaudeTokensPath(standaloneData) == Path.Combine(standaloneData, "claude-tokens.dat") &&
+        hostedArgs!.ClaudeTokensPath == HostedMode.SharedClaudeTokensPath(HostedMode.StandaloneDirectory) &&
+        !hostedArgs.ClaudeTokensPath.StartsWith(moduleData, StringComparison.OrdinalIgnoreCase), "hosted mode uses the single standalone Claude token file, not one in the module data folder");
+    var appSource = File.ReadAllText(FindRepositoryFile("src", "AqTracker", "App.xaml.cs"));
+    var claudeWindowSource = File.ReadAllText(FindRepositoryFile("src", "AqTracker", "MainWindow.Claude.cs"));
+    Assert(appSource.Contains("claudeTokensPath: _hosted?.ClaudeTokensPath", StringComparison.Ordinal) && claudeWindowSource.Contains("new ClaudeTokenStore(_claudeTokensPath ??", StringComparison.Ordinal), "the hosted window's Claude client reads and atomically rewrites the shared token file");
     File.WriteAllText(Path.Combine(standaloneData, "settings.json"), "{\"Theme\":\"Escuro\"}");
     Assert(!HostedMode.MigrateFrom(standaloneData, moduleData) && new SettingsStore(Path.Combine(moduleData, "settings.json")).Load().Theme == "Claro", "hosted data in use is never overwritten by later standalone changes");
 }

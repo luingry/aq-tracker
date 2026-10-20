@@ -1,11 +1,12 @@
 # Erros e solucoes conhecidas
 
-## Teste do modo hospedado rotacionou o refresh token do Claude do standalone (0.31.0)
+## Copia do login do Claude no modo hospedado invalidava a outra copia (0.31.0)
 
 - **Sintoma (2026-10-19):** ao testar o modulo do SwissTechKnife com uma pasta de dados vazia, a migracao copiou `claude-tokens.dat` de `%APPDATA%\AqTracker`; o processo hospedado renovou o token (arquivo regravado, hash do refresh token diferente) e a copia do standalone ficou com um refresh token possivelmente revogado.
 - **Causa raiz:** o OAuth do Claude rotaciona o refresh token a cada renovacao. Depois da migracao as duas copias (standalone e modulo) divergem; quem renovar por ultimo invalida a outra.
-- **Solucao:** a copia renovada foi devolvida para `%APPDATA%\AqTracker\claude-tokens.dat` (DPAPI do mesmo usuario, copia de arquivo basta) antes de reabrir o standalone, que voltou `Connected`. Comportamento documentado no README: voltar do modulo para o standalone pode exigir reconectar o Claude.
-- **Prevencao:** em smoke tests do modo `--hosted`, pre-criar `settings.json` na pasta de dados de teste (pula a migracao) e desativar o perfil Claude; so testar a migracao real quando o objetivo for justamente trocar para o modulo.
+- **Solucao imediata:** a copia renovada foi devolvida para `%APPDATA%\AqTracker\claude-tokens.dat` (DPAPI do mesmo usuario) antes de reabrir o standalone, que voltou `Connected`.
+- **Solucao definitiva (ainda na 0.31.0):** `claude-tokens.dat` saiu da lista de migracao; no modo hospedado o `ClaudeTokenStore` aponta para o arquivo unico do standalone (`HostedMode.ClaudeTokensPath`), com as mesmas gravacoes atomicas. O mutex compartilhado garante que standalone e hospedado nunca rodam juntos, entao existe um so dono do token por vez e alternar entre os modos mantem o Claude conectado.
+- **Prevencao:** nunca duplicar credenciais OAuth com refresh token rotativo entre pastas de dados; compartilhar o arquivo e serializar o acesso. Em smoke tests do `--hosted` com o perfil Claude ativo, lembrar que o processo hospedado renova o token real do usuario.
 
 ## Percentual do Claude congelado sem nenhum erro no log (0.30.2)
 

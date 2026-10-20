@@ -22,7 +22,7 @@ public partial class MainWindow
     private void InitializeClaude()
     {
         _pendingClaudeAccentColor = _settings.ClaudeAccentColor;
-        _claudeClient = new ClaudeUsageClient(new ClaudeTokenStore(Path.Combine(_store.DirectoryPath, "claude-tokens.dat")),
+        _claudeClient = new ClaudeUsageClient(new ClaudeTokenStore(_claudeTokensPath ?? Path.Combine(_store.DirectoryPath, HostedMode.ClaudeTokensFileName)),
             Path.Combine(_store.DirectoryPath, "claude-quota.json"), CurrentVersion);
         _viewModel.SetClaudeEnabled(_settings.ClaudeProfileEnabled);
         _viewModel.ApplyClaude(_claudeClient.Snapshot, _claudeClient.State, true);

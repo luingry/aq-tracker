@@ -27,6 +27,16 @@ jobs:
         shell: pwsh
         run: ./scripts/build-installer.ps1
 
+      # The SwissTechKnife module package ships as an asset of the same release, so the newest
+      # release always carries it and the cleanup below never deletes the current package.
+      - name: Build SwissTechKnife module package
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $module = ./scripts/pack-module.ps1 | Select-Object -Last 1
+          "| Module package | sha256 | size |`n|---|---|---|`n| ``$(Split-Path -Leaf $module.File)`` | ``$($module.Sha256)`` | $($module.Size) |" |
+            Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY
+
       - name: Read version and matching changelog section
         id: release_metadata
         shell: pwsh
@@ -69,12 +79,24 @@ jobs:
           "tag=v$version" | Add-Content -LiteralPath $env:GITHUB_OUTPUT
           "notes_path=$notesPath" | Add-Content -LiteralPath $env:GITHUB_OUTPUT
           "installer_path=$((Resolve-Path -LiteralPath $installerPath).Path)" | Add-Content -LiteralPath $env:GITHUB_OUTPUT
+          $modulePath = Join-Path artifacts "aq-tracker-$version.zip"
+          if (-not (Test-Path -LiteralPath $modulePath -PathType Leaf)) {
+            throw "Module packaging did not produce $modulePath."
+          }
+          "module_path=$((Resolve-Path -LiteralPath $modulePath).Path)" | Add-Content -LiteralPath $env:GITHUB_OUTPUT
 
       - name: Upload setup artifact
         uses: actions/upload-artifact@v4
         with:
           name: AqTracker-Setup-${{ steps.release_metadata.outputs.version }}
           path: ${{ steps.release_metadata.outputs.installer_path }}
+          if-no-files-found: error
+
+      - name: Upload module package artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: aq-tracker-${{ steps.release_metadata.outputs.version }}
+          path: ${{ steps.release_metadata.outputs.module_path }}
           if-no-files-found: error
 
       - name: Publish GitHub release and remove older releases
@@ -86,6 +108,7 @@ jobs:
           $ErrorActionPreference = 'Stop'
           $tag = '${{ steps.release_metadata.outputs.tag }}'
           $installer = '${{ steps.release_metadata.outputs.installer_path }}'
+          $modulePackage = '${{ steps.release_metadata.outputs.module_path }}'
           $notes = '${{ steps.release_metadata.outputs.notes_path }}'
           $title = 'Agent Quota Tracker ${{ steps.release_metadata.outputs.version }}'
 
@@ -212,7 +235,7 @@ jobs:
           Copy-Item -LiteralPath $installer -Destination $legacyInstaller -Force
 
           $uploaded = Invoke-GhWithRetry -Action "Upload setup assets for $tag" -Command {
-            gh release upload $tag $installer $legacyInstaller --clobber
+            gh release upload $tag $installer $legacyInstaller $modulePackage --clobber
           }
           if (-not $uploaded.Succeeded) { throw "Failed to upload the setup assets for $tag." }
 

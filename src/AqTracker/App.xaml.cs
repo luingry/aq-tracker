@@ -96,7 +96,7 @@ public partial class App : System.Windows.Application
             ? !_hosted.ShowOnStart
             : e.Args.Contains("--startup", StringComparer.OrdinalIgnoreCase);
         var window = new MainWindow(e.Args.Contains("--demo", StringComparer.OrdinalIgnoreCase), store,
-            startMinimized: startMinimized, initialSettings: settings, hosted: _hosted is not null);
+            startMinimized: startMinimized, initialSettings: settings, hosted: _hosted is not null, claudeTokensPath: _hosted?.ClaudeTokensPath);
         MainWindow = window;
         window.Start();
         if (_hosted is { OpenSettingsOnStart: true }) window.HandleHostCommand(HostCommand.Settings);

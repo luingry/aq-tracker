@@ -27,12 +27,26 @@ public sealed class HostedMode : IDisposable
     public static string ExitEventName(string mutexName) => mutexName + ".Hosted.Exit";
     public static string CommandEventName(string mutexName, HostCommand command) => mutexName + "." + command;
 
-    /// <summary>Files carried over from the standalone data folder on the first hosted run.</summary>
+    public const string ClaudeTokensFileName = "claude-tokens.dat";
+
+    /// <summary>
+    /// Files carried over from the standalone data folder on the first hosted run. The Claude tokens are not
+    /// among them: OAuth rotates the refresh token on every renewal, so two copies would invalidate each other.
+    /// </summary>
     private static readonly string[] StandaloneDataFiles =
     [
-        "settings.json", "settings.json.bak", "claude-tokens.dat", "claude-quota.json",
+        "settings.json", "settings.json.bak", "claude-quota.json",
         "quota-history.json", "quota-history.initial.json",
     ];
+
+    /// <summary>The standalone tracker's data folder (%APPDATA%\AqTracker).</summary>
+    public static string StandaloneDirectory => Path.Combine(UserFolders.ApplicationData, LegacyDataMigration.FolderName);
+
+    /// <summary>The one Claude token file both modes use; the shared mutex keeps them from running together.</summary>
+    public static string SharedClaudeTokensPath(string standaloneDirectory) => Path.Combine(standaloneDirectory, ClaudeTokensFileName);
+
+    /// <summary>Hosted mode keeps the standalone Claude sign-in (DPAPI current-user, atomic writes) instead of a copy.</summary>
+    public string ClaudeTokensPath => SharedClaudeTokensPath(StandaloneDirectory);
 
     private EventWaitHandle? _exitEvent;
     private RegisteredWaitHandle? _exitRegistration;
@@ -76,12 +90,11 @@ public sealed class HostedMode : IDisposable
     }
 
     /// <summary>
-    /// First hosted run (no settings.json in the module folder yet): copies the standalone data so the user
-    /// keeps preferences, the Claude sign-in (DPAPI current-user, so a plain copy stays readable) and history.
+    /// First hosted run (no settings.json in the module folder yet): copies the standalone preferences, Claude
+    /// quota cache and history. The Claude sign-in is shared, not copied (see <see cref="ClaudeTokensPath"/>).
     /// The standalone folder is never modified.
     /// </summary>
-    public void MigrateStandaloneData() =>
-        MigrateFrom(Path.Combine(UserFolders.ApplicationData, LegacyDataMigration.FolderName), DataDirectory);
+    public void MigrateStandaloneData() => MigrateFrom(StandaloneDirectory, DataDirectory);
 
     /// <summary>Copies the known data files from <paramref name="standaloneDirectory"/> unless <paramref name="dataDirectory"/> is in use.</summary>
     public static bool MigrateFrom(string standaloneDirectory, string dataDirectory)
