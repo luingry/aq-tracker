@@ -5,5 +5,16 @@
   "entryType": "AqTracker.Module.AqTrackerModule",
   "sdkVersion": 1,
   "activation": "startup",
-  "loadMode": "memory"
+  "loadMode": "memory",
+  "releaseNotes": [
+    {
+      "version": "0.31.0",
+      "notes": [
+        "First release as a SwissTechKnife module: starts with SwissTechKnife and restarts automatically after a failure.",
+        "The module page shows the tracker's status and the Show widget, Open settings and Refresh now buttons.",
+        "Preferences and quota history are copied once from the installed Agent Quota Tracker, and the Claude sign-in is shared with it.",
+        "While the installed Agent Quota Tracker is open, the module waits and takes over when it closes."
+      ]
+    }
+  ]
 }

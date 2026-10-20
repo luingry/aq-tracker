@@ -6,6 +6,7 @@
 - Não duplique a versão em projetos ou no instalador: `Directory.Build.props` e `installer/AqTracker.iss` a leem de `VERSION`.
 - Valide com `dotnet build .\AqTracker.sln` e `dotnet run --project .\tests\AqTracker.Tests\AqTracker.Tests.csproj`.
 - A release é disparada apenas por push para `main` que altere `VERSION` ou `CHANGELOG.md`; a seção do changelog deve corresponder exatamente à versão atual. O workflow publica o setup e conserva somente a release e a tag mais recentes.
+- A release também leva `aq-tracker-<versão>.zip`, o módulo do SwissTechKnife; a sincronização do catálogo do SwissTechKnife o publica sozinha. O catálogo é em inglês: no mesmo bump, adicione as notas da versão em inglês em `releaseNotes` de `src/AqTracker.Module/module.json` (`[{ "version": "x.y.z", "notes": ["…"] }]`).
 
 ## Entrega local obrigatória
 
