@@ -1,0 +1,33 @@
+<UserControl x:Class="AqTracker.Module.ModulePage"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:ui="clr-namespace:SwissTechKnife.Sdk;assembly=SwissTechKnife.Sdk">
+    <!-- Design-system keys only (SwissTechKnife.Sdk theme, resolved from the host at runtime). -->
+    <ScrollViewer Padding="28,8,28,28">
+        <Border Style="{StaticResource Card}" Padding="24" MaxWidth="640" HorizontalAlignment="Left" VerticalAlignment="Top">
+            <StackPanel>
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <TextBlock Text="Cotas do Codex e do Claude" Style="{StaticResource Text.Subtitle}" VerticalAlignment="Center" />
+                    <Border x:Name="StatusChip" Grid.Column="1" Style="{StaticResource Chip}">
+                        <TextBlock x:Name="StatusText" VerticalAlignment="Center" />
+                    </Border>
+                </Grid>
+                <TextBlock x:Name="StatusDetail" Style="{StaticResource Text.Paragraph}" Margin="0,10,0,0" />
+                <TextBlock Style="{StaticResource Text.Caption}" Margin="0,14,0,0" TextWrapping="Wrap"
+                           Text="O widget flutuante aparece sozinho quando há agentes trabalhando ou conclusões não lidas. Tema, cores, moeda e a conexão com o Claude ficam nas configurações do widget, que roda em um processo próprio para nunca pesar no SwissTechKnife." />
+                <WrapPanel Margin="0,20,0,0">
+                    <Button x:Name="ShowButton" Style="{StaticResource Button.Primary}" ui:Ui.Icon="&#xE8A7;"
+                            Content="Mostrar widget" Margin="0,0,8,8" Click="ShowButton_OnClick" />
+                    <Button x:Name="SettingsButton" Style="{StaticResource Button.Secondary}" ui:Ui.Icon="&#xE713;"
+                            Content="Abrir configurações" Margin="0,0,8,8" Click="SettingsButton_OnClick" />
+                    <Button x:Name="RefreshButton" Style="{StaticResource Button.Ghost}" ui:Ui.Icon="&#xE72C;"
+                            Content="Atualizar agora" Margin="0,0,0,8" Click="RefreshButton_OnClick" />
+                </WrapPanel>
+            </StackPanel>
+        </Border>
+    </ScrollViewer>
+</UserControl>

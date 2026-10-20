@@ -35,6 +35,7 @@ public partial class MainWindow : Window
     private readonly Dictionary<string, string> _threadTitles = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, DateTimeOffset> _threadTitleLookups = new(StringComparer.OrdinalIgnoreCase);
     private readonly bool _demo;
+    private readonly bool _hosted;
     private readonly HashSet<string> _observedCompletionIds = new(StringComparer.OrdinalIgnoreCase);
     private readonly List<CompletedAgentWork> _unreadAgentWorks;
     private AppSettings _settings;
@@ -88,12 +89,15 @@ public partial class MainWindow : Window
     [Flags]
     private enum ResizeEdge { None = 0, Left = 1, Top = 2, Right = 4, Bottom = 8 }
 
-    public MainWindow(bool demo = false, SettingsStore? settingsStore = null, bool startMinimized = false, WindowsStartupRegistration? windowsStartup = null, AppSettings? initialSettings = null)
+    public MainWindow(bool demo = false, SettingsStore? settingsStore = null, bool startMinimized = false, WindowsStartupRegistration? windowsStartup = null, AppSettings? initialSettings = null, bool hosted = false)
     {
+        _hosted = hosted;
         _store = settingsStore ?? new();
         _windowsStartup = windowsStartup ?? new WindowsStartupRegistration(RuntimePaths.ExecutablePath);
         _startupHidden = startMinimized;
         _settings = initialSettings ?? _store.Load();
+        // Hosted has no notification-area icon, so a migrated "tray only" preference would hide the widget for good.
+        if (_hosted) _settings = _settings with { ShowInNotificationArea = false };
         _startupHidden |= _settings.ShowInNotificationArea;
         if (_startupHidden) ShowActivated = false;
         _unreadAgentWorks = (_settings.UnreadAgentWorks ?? []).OrderByDescending(work => work.CompletedAt).ToList();
@@ -102,6 +106,13 @@ public partial class MainWindow : Window
         _viewModel = new MainViewModel(new QuotaSnapshotStore(Path.Combine(_store.DirectoryPath, "quota-history.json")));
         InitializeClaude();
         InitializeComponent();
+        if (_hosted)
+        {
+            // SwissTechKnife starts, updates and shows the hosted tracker (module page replaces the tray).
+            StartupRow.Visibility = Visibility.Collapsed;
+            NotificationAreaRow.Visibility = Visibility.Collapsed;
+            CheckForUpdatesButton.Visibility = Visibility.Collapsed;
+        }
         AddHandler(Mouse.PreviewMouseDownEvent, new MouseButtonEventHandler(OnWindowPreviewMouseDown), true);
         AddHandler(Mouse.PreviewMouseMoveEvent, new System.Windows.Input.MouseEventHandler(OnWindowPreviewMouseMove), true);
         AddHandler(Mouse.PreviewMouseUpEvent, new MouseButtonEventHandler(OnWindowPreviewMouseUp), true);
@@ -506,6 +517,7 @@ public partial class MainWindow : Window
 
     private void CreateTray()
     {
+        if (_hosted) return;
         if (_tray is null)
         {
             _tray = new Forms.NotifyIcon { Text = "Agent Quota Tracker" };
@@ -555,7 +567,25 @@ public partial class MainWindow : Window
         await RefreshAgentsAsync();
         UpdateWidgetVisibility();
         _ = RefreshAnalyticsAsync();
-        _ = CheckForUpdatesIfDueAsync();
+        if (!_hosted) _ = CheckForUpdatesIfDueAsync();
+    }
+
+    /// <summary>Tray-menu equivalents signalled by the SwissTechKnife module page.</summary>
+    internal void HandleHostCommand(HostCommand command)
+    {
+        switch (command)
+        {
+            case HostCommand.Show:
+                ShowFromTray();
+                break;
+            case HostCommand.Settings:
+                ShowFromTray();
+                if (SettingsPanel.Visibility != Visibility.Visible) Settings(this, new RoutedEventArgs());
+                break;
+            case HostCommand.Refresh:
+                _ = RefreshAsync();
+                break;
+        }
     }
 
     private void ShowFromTray()
@@ -896,8 +926,9 @@ public partial class MainWindow : Window
             : _settings.CodexPath;
         CancelClaudeLogin();
         var enableTray = NotificationAreaBox.IsChecked == true && !_settings.ShowInNotificationArea;
-        var startupEnabled = StartupBox.IsChecked == true;
-        _windowsStartup.SetEnabled(startupEnabled);
+        // Hosted: the host starts the tracker; the standalone Run entry is left as the user set it.
+        var startupEnabled = _hosted ? _settings.StartMinimizedWithWindows : StartupBox.IsChecked == true;
+        if (!_hosted) _windowsStartup.SetEnabled(startupEnabled);
         _settings = _settings with { CodexPath = manualCodexPath, UsdBrl = rate > 0 ? rate : 5.5m, Theme = theme, CurrencyCode = currency, AccentColor = AccentPalette.Normalize(_pendingAccentColor), LanguageCode = language, CompactQuotaDisplay = compactQuotaDisplay,
             ClaudeProfileEnabled = ClaudeEnabledBox.IsChecked != false, ClaudeAccentColor = AccentPalette.Normalize(_pendingClaudeAccentColor), StartMinimizedWithWindows = startupEnabled, ShowInNotificationArea = NotificationAreaBox.IsChecked == true, FadeFloatingWidget = FadeWidgetBox.IsChecked == true, FloatingOpacityPercent = (int)FloatingOpacitySlider.Value };
         LocalizationManager.Apply(language);

@@ -470,12 +470,12 @@
                   <Border Style="{StaticResource SettingsCard}">
                     <StackPanel>
                       <TextBlock Text="{DynamicResource Loc.SettingsGeneral}" Style="{StaticResource SettingsSectionTitle}" Margin="0,0,0,8" />
-                      <Grid Margin="0,4">
+                      <Grid x:Name="StartupRow" Margin="0,4">
                         <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
                         <TextBlock Text="{DynamicResource Loc.StartMinimizedWithWindows}" Style="{StaticResource SettingsRowLabel}" TextTrimming="None" TextWrapping="Wrap" Margin="0,0,10,0" />
                         <CheckBox x:Name="StartupBox" Grid.Column="1" Style="{StaticResource ThemeSwitch}" AutomationProperties.Name="{DynamicResource Loc.StartMinimizedWithWindows}" />
                       </Grid>
-                      <Grid Margin="0,4"><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions><TextBlock Text="{DynamicResource Loc.ShowInNotificationArea}" Style="{StaticResource SettingsRowLabel}" TextTrimming="None" TextWrapping="Wrap" Margin="0,0,10,0" /><CheckBox x:Name="NotificationAreaBox" Grid.Column="1" Style="{StaticResource ThemeSwitch}" AutomationProperties.Name="{DynamicResource Loc.ShowInNotificationArea}" /></Grid>
+                      <Grid x:Name="NotificationAreaRow" Margin="0,4"><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions><TextBlock Text="{DynamicResource Loc.ShowInNotificationArea}" Style="{StaticResource SettingsRowLabel}" TextTrimming="None" TextWrapping="Wrap" Margin="0,0,10,0" /><CheckBox x:Name="NotificationAreaBox" Grid.Column="1" Style="{StaticResource ThemeSwitch}" AutomationProperties.Name="{DynamicResource Loc.ShowInNotificationArea}" /></Grid>
                       <Grid Margin="0,4"><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions><TextBlock Text="{DynamicResource Loc.FadeFloatingWidget}" Style="{StaticResource SettingsRowLabel}" TextTrimming="None" TextWrapping="Wrap" Margin="0,0,10,0" /><CheckBox x:Name="FadeWidgetBox" Grid.Column="1" Style="{StaticResource ThemeSwitch}" AutomationProperties.Name="{DynamicResource Loc.FadeFloatingWidget}" /></Grid>
                       <Grid x:Name="FloatingOpacityRow" Margin="0,0,0,6" Visibility="{Binding IsChecked, ElementName=FadeWidgetBox, Converter={StaticResource BooleanToVisibility}}">
                         <Grid.ColumnDefinitions><ColumnDefinition Width="Auto" /><ColumnDefinition Width="*" /><ColumnDefinition Width="38" /></Grid.ColumnDefinitions>

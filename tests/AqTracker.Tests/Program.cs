@@ -444,6 +444,29 @@ finally
 {
     if (Directory.Exists(migrationRoot)) Directory.Delete(migrationRoot, true);
 }
+var hostedRoot = Path.Combine(Path.GetTempPath(), "AqTracker.Tests", "hosted-" + Guid.NewGuid().ToString("N"));
+try
+{
+    var moduleData = Path.Combine(hostedRoot, "module data");
+    var hostedArgs = HostedMode.TryParse(["--hosted", "--parent", "1234", "--data", moduleData, "--open-settings"]);
+    Assert(hostedArgs is { ParentId: 1234, ShowOnStart: true, OpenSettingsOnStart: true } && hostedArgs.SettingsPath == Path.Combine(moduleData, "settings.json"), "hosted arguments carry the parent, the module data folder and the settings request (which also shows the widget)");
+    Assert(HostedMode.TryParse(["--startup"]) is null && HostedMode.TryParse(["--hosted"]) is null && HostedMode.TryParse(["--hosted", "--data", "relative"]) is null, "standalone and incomplete hosted command lines stay standalone");
+    Assert(HostedMode.TryParse(["--hosted", "--data", moduleData]) is { ShowOnStart: false, OpenSettingsOnStart: false }, "the host starts the tracker hidden unless the module page asks to show it");
+    Assert(HostedMode.ExitEventName(@"Local\AqTracker.User.S-1") == @"Local\AqTracker.User.S-1.Hosted.Exit" && HostedMode.CommandEventName(@"Local\AqTracker.User.S-1", HostCommand.Settings) == @"Local\AqTracker.User.S-1.Settings", "hosted event names match the ones the SwissTechKnife module signals");
+    var standaloneData = Path.Combine(hostedRoot, "AqTracker");
+    Directory.CreateDirectory(standaloneData);
+    File.WriteAllText(Path.Combine(standaloneData, "settings.json"), "{\"Theme\":\"Claro\"}");
+    File.WriteAllText(Path.Combine(standaloneData, "claude-tokens.dat"), "dpapi");
+    File.WriteAllText(Path.Combine(standaloneData, "claude-quota.json"), "{}");
+    File.WriteAllText(Path.Combine(standaloneData, "unrelated.txt"), "x");
+    Assert(HostedMode.MigrateFrom(standaloneData, moduleData) && new SettingsStore(Path.Combine(moduleData, "settings.json")).Load().Theme == "Claro" && File.ReadAllText(Path.Combine(moduleData, "claude-tokens.dat")) == "dpapi" && File.Exists(Path.Combine(moduleData, "claude-quota.json")) && !File.Exists(Path.Combine(moduleData, "unrelated.txt")) && File.Exists(Path.Combine(standaloneData, "settings.json")), "the first hosted run copies the standalone settings, Claude sign-in and quota cache, leaving the standalone folder intact");
+    File.WriteAllText(Path.Combine(standaloneData, "settings.json"), "{\"Theme\":\"Escuro\"}");
+    Assert(!HostedMode.MigrateFrom(standaloneData, moduleData) && new SettingsStore(Path.Combine(moduleData, "settings.json")).Load().Theme == "Claro", "hosted data in use is never overwritten by later standalone changes");
+}
+finally
+{
+    if (Directory.Exists(hostedRoot)) Directory.Delete(hostedRoot, true);
+}
 Assert(SettingsStore.Normalize(new AppSettings(AccentColor: "not-a-color")).AccentColor == AccentPalette.DefaultBaseHex, "invalid persisted accent colors migrate to the safe default");
 Assert(SettingsStore.Normalize(new AppSettings(LanguageCode: "fr-FR")).LanguageCode == "pt-BR", "unsupported persisted languages migrate to pt-BR");
 Assert(SettingsStore.Normalize(new AppSettings(CompactQuotaDisplay: "5h")).CompactQuotaDisplay == "5h" && SettingsStore.Normalize(new AppSettings(CompactQuotaDisplay: "7d")).CompactQuotaDisplay == "7d" && SettingsStore.Normalize(new AppSettings(CompactQuotaDisplay: "both")).CompactQuotaDisplay == "both" && SettingsStore.Normalize(new AppSettings(CompactQuotaDisplay: "unknown")).CompactQuotaDisplay == "both", "compact quota selection persists only five-hour, seven-day, or both with both as the safe default");

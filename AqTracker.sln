@@ -8,6 +8,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "AqTracker", "src\AqTracker\
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "AqTracker.Tests", "tests\AqTracker.Tests\AqTracker.Tests.csproj", "{76E3F1A0-9CC7-489C-8B4D-42162AC234A1}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "AqTracker.Module", "src\AqTracker.Module\AqTracker.Module.csproj", "{647550D8-C58E-4C37-AAE1-29370E57CFE7}"
+EndProject
 Global
  GlobalSection(SolutionConfigurationPlatforms) = preSolution
   Debug|Any CPU = Debug|Any CPU
@@ -26,6 +28,10 @@ Global
   {76E3F1A0-9CC7-489C-8B4D-42162AC234A1}.Debug|Any CPU.Build.0 = Debug|Any CPU
   {76E3F1A0-9CC7-489C-8B4D-42162AC234A1}.Release|Any CPU.ActiveCfg = Release|Any CPU
   {76E3F1A0-9CC7-489C-8B4D-42162AC234A1}.Release|Any CPU.Build.0 = Release|Any CPU
+  {647550D8-C58E-4C37-AAE1-29370E57CFE7}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+  {647550D8-C58E-4C37-AAE1-29370E57CFE7}.Debug|Any CPU.Build.0 = Debug|Any CPU
+  {647550D8-C58E-4C37-AAE1-29370E57CFE7}.Release|Any CPU.ActiveCfg = Release|Any CPU
+  {647550D8-C58E-4C37-AAE1-29370E57CFE7}.Release|Any CPU.Build.0 = Release|Any CPU
  EndGlobalSection
 EndGlobal
 

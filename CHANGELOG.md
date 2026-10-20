@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.31.0] - 2026-10-19
+
+### Adicionado
+
+- Módulo do SwissTechKnife (`aq-tracker`): o host passa a iniciar, supervisionar e encerrar o Agent Quota Tracker. O widget continua em um processo próprio (SQLite, System.Text.Json 8 e o app-server do Codex ficam fora do host), é reiniciado após uma falha (no máximo 3 vezes por minuto) e para quando o módulo é desativado ou o host fecha.
+- A página do módulo mostra o estado do tracker e tem os botões **Mostrar widget**, **Abrir configurações** e **Atualizar agora**, que substituem o menu da área de notificação.
+- Modo `--hosted` no aplicativo: preferências, login do Claude, cache de cota e histórico ficam na pasta de dados do módulo (copiados uma única vez de `%APPDATA%\AqTracker` na primeira execução); sem ícone na área de notificação, sem verificação ou instalação de atualizações e sem registro de início com o Windows, que passam a ser do host.
+- O tracker standalone e o hospedado usam o mesmo mutex por usuário: nunca rodam juntos. Com um standalone aberto, o módulo aguarda e assume quando ele fecha.
+- `scripts/pack-module.ps1` gera `artifacts/aq-tracker-<versão>.zip` e informa sha256 e tamanho para o catálogo do host.
+
+### Alterado
+
+- O comportamento do aplicativo standalone não muda; ele apenas também atende aos comandos de mostrar, configurar e atualizar enviados pela página do módulo.
+
 ## [0.30.4] - 2026-10-10
 
 ### Fixed

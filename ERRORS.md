@@ -1,5 +1,12 @@
 # Erros e solucoes conhecidas
 
+## Teste do modo hospedado rotacionou o refresh token do Claude do standalone (0.31.0)
+
+- **Sintoma (2026-10-19):** ao testar o modulo do SwissTechKnife com uma pasta de dados vazia, a migracao copiou `claude-tokens.dat` de `%APPDATA%\AqTracker`; o processo hospedado renovou o token (arquivo regravado, hash do refresh token diferente) e a copia do standalone ficou com um refresh token possivelmente revogado.
+- **Causa raiz:** o OAuth do Claude rotaciona o refresh token a cada renovacao. Depois da migracao as duas copias (standalone e modulo) divergem; quem renovar por ultimo invalida a outra.
+- **Solucao:** a copia renovada foi devolvida para `%APPDATA%\AqTracker\claude-tokens.dat` (DPAPI do mesmo usuario, copia de arquivo basta) antes de reabrir o standalone, que voltou `Connected`. Comportamento documentado no README: voltar do modulo para o standalone pode exigir reconectar o Claude.
+- **Prevencao:** em smoke tests do modo `--hosted`, pre-criar `settings.json` na pasta de dados de teste (pula a migracao) e desativar o perfil Claude; so testar a migracao real quando o objetivo for justamente trocar para o modulo.
+
 ## Percentual do Claude congelado sem nenhum erro no log (0.30.2)
 
 - **Sintoma (2026-10-08):** o widget mostrava o percentual do Claude parado (5h = 55% as 19:47) enquanto a API ja retornava 84%; agentes Claude continuavam aparecendo. Estado `Connected`, token valido (expira 00:09) e nenhuma linha `Claude ...` no log durante mais de uma hora, embora o timer chamasse `RefreshClaudeAsync` a cada minuto.

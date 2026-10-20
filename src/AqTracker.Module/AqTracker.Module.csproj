@@ -1,0 +1,25 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!--
+    SwissTechKnife module (aq-tracker): a thin supervisor that runs the AqTracker widget in its own process
+    (hosted mode). The app is packaged next to it by scripts/pack-module.ps1; this assembly only depends on the SDK.
+    Version comes from VERSION through Directory.Build.props, like the app.
+  -->
+  <PropertyGroup>
+    <TargetFramework>net48</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <RootNamespace>AqTracker.Module</RootNamespace>
+    <AssemblyName>AqTracker.Module</AssemblyName>
+    <UseWPF>true</UseWPF>
+    <DebugType>embedded</DebugType>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NETFramework.ReferenceAssemblies" Version="1.0.3" PrivateAssets="all" />
+  </ItemGroup>
+  <ItemGroup>
+    <!-- Compile-only: the host provides the one shared copy at runtime. Refresh from a SwissTechKnife build. -->
+    <Reference Include="SwissTechKnife.Sdk" HintPath="lib\SwissTechKnife.Sdk.dll" Private="false" />
+    <None Include="module.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+</Project>

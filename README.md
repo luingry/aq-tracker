@@ -66,6 +66,20 @@ dotnet run --project .\tests\AqTracker.Tests\AqTracker.Tests.csproj
 
 The generated installer is `artifacts\AqTracker-latest.exe`.
 
+## SwissTechKnife module
+
+`src/AqTracker.Module` packages the tracker as a [SwissTechKnife](https://github.com/luingry/SwissTechKnife) module (`aq-tracker`, activation `startup`). The module is a thin supervisor: it runs the regular app in its own process (`AqTracker.Hosted.exe --hosted --parent <host pid> --data <module data folder>`), so its widget window, SQLite, System.Text.Json 8 and the Codex app-server never share the host's UI thread, assemblies or crashes. The module page shows the status and **Mostrar widget**, **Abrir configurações** and **Atualizar agora**, which replace the tray menu.
+
+Hosted mode differences: settings, Claude tokens, the Claude quota cache and the quota history live in the module's data folder (copied once from `%APPDATA%\AqTracker` on first run; the standalone folder is never modified); no tray icon, update check/install or Run-key auto-start (the host owns them); exits with the host or when the module is disabled (named exit event). Logs and the analytics cache stay in `%LOCALAPPDATA%\AqTracker`. The per-user single-instance mutex is shared, so standalone and hosted never poll together: while a standalone tracker runs, the module waits and takes over when it exits. The module restarts the app after a crash (at most 3 times a minute).
+
+Because Claude refresh tokens rotate, the copied sign-in and the standalone one diverge after the first hosted refresh; going back to the standalone app may require reconnecting Claude.
+
+```powershell
+powershell -File scripts/pack-module.ps1   # artifacts\aq-tracker-<VERSION>.zip + sha256/size
+```
+
+The module version is `VERSION` (stamped into the packaged `module.json`). `src/AqTracker.Module/lib/SwissTechKnife.Sdk.dll` is a compile-only reference copied from a SwissTechKnife build; it is never packaged. Publish the zip, then put its URL, sha256 and size in the host's `catalog/catalog.json`. Every repack changes the hash (zip timestamps), so upload exactly the zip whose hash is in the catalog.
+
 ## License
 
 [MIT](LICENSE).

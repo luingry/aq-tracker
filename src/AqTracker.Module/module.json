@@ -1,0 +1,9 @@
+{
+  "id": "aq-tracker",
+  "version": "0.31.0",
+  "entryAssembly": "AqTracker.Module.dll",
+  "entryType": "AqTracker.Module.AqTrackerModule",
+  "sdkVersion": 1,
+  "activation": "startup",
+  "loadMode": "memory"
+}
