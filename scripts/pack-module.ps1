@@ -41,7 +41,7 @@ try {
     function Add-Entry([string]$file, [string]$entry) {
         [IO.Compression.ZipFileExtensions]::CreateEntryFromFile($zip, $file, $entry, 'Optimal') | Out-Null
     }
-    $json = $manifest | ConvertTo-Json
+    $json = $manifest | ConvertTo-Json -Depth 5
     $entry = $zip.CreateEntry('module.json', 'Optimal')
     $writer = New-Object IO.StreamWriter($entry.Open(), (New-Object Text.UTF8Encoding($false)))
     try { $writer.Write($json) } finally { $writer.Dispose() }
