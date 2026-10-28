@@ -1,12 +1,19 @@
 {
   "id": "aq-tracker",
-  "version": "0.31.0",
+  "version": "0.32.0",
   "entryAssembly": "AqTracker.Module.dll",
   "entryType": "AqTracker.Module.AqTrackerModule",
   "sdkVersion": 1,
   "activation": "startup",
   "loadMode": "memory",
+  "window": true,
   "releaseNotes": [
+    {
+      "version": "0.32.0",
+      "notes": [
+        "Double-clicking the module's notification-area icon shows the widget."
+      ]
+    },
     {
       "version": "0.31.0",
       "notes": [

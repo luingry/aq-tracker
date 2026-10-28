@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.32.0] - 2026-10-28
+
+### Adicionado
+
+- Módulo do SwissTechKnife: o duplo clique no ícone do módulo na área de notificação mostra o widget, como o botão **Mostrar widget** da página do módulo (requer SwissTechKnife 0.5.1 ou mais novo).
+
 ## [0.31.0] - 2026-10-19
 
 ### Adicionado
