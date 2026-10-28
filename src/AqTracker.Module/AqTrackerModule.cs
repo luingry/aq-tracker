@@ -9,7 +9,7 @@ namespace AqTracker.Module;
 /// and the Codex app-server child stay out of the host); the module starts it with the host, restarts it after a
 /// crash, stops it when disabled and shows the widget or its settings from the module page.
 /// </summary>
-public sealed class AqTrackerModule : IBackgroundModule
+public sealed class AqTrackerModule : IBackgroundModule, IModuleWindow
 {
     /// <summary>Folder (inside the package) holding the app build; see scripts/pack-module.ps1.</summary>
     internal const string AppFolder = "app";
@@ -32,6 +32,9 @@ public sealed class AqTrackerModule : IBackgroundModule
     public void Stop() => _supervisor?.Stop();
 
     public FrameworkElement CreateView() => new ModulePage(_supervisor!, _context!);
+
+    /// <summary>Double click on the module's notification-area icon: shows the widget, like the page's "Mostrar widget".</summary>
+    public void ShowWindow() => _supervisor?.Send(TrackerCommand.Show);
 
     public void Dispose()
     {
