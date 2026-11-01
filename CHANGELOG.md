@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.32.1] - 2026-11-01
+
+### Corrigido
+
+- Claude: uma rejeição do login (refresh do token recusado) não apaga mais `claude-tokens.dat`. Antes, uma única rejeição — mesmo passageira — desconectava o Claude de vez e a cota parava de atualizar até um novo login. Agora as credenciais ficam guardadas, são testadas de novo a cada 15 minutos e o estado volta a **Conectado** sozinho quando o servidor as aceita; um refresh token já rotacionado no disco pelo outro modo (standalone/hospedado) é adotado em vez de pedir reconexão.
+- Claude: só `400`/`401` do endpoint de token contam como rejeição; outras respostas (ex.: `403` de borda) entram no backoff normal.
+- O log passa a registrar o motivo da rejeição (status HTTP e código de erro OAuth, como `invalid_grant`), sem segredos.
+
 ## [0.32.0] - 2026-10-28
 
 ### Adicionado

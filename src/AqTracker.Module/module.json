@@ -1,6 +1,6 @@
 {
   "id": "aq-tracker",
-  "version": "0.32.0",
+  "version": "0.32.1",
   "entryAssembly": "AqTracker.Module.dll",
   "entryType": "AqTracker.Module.AqTrackerModule",
   "sdkVersion": 1,
@@ -8,6 +8,13 @@
   "loadMode": "memory",
   "window": true,
   "releaseNotes": [
+    {
+      "version": "0.32.1",
+      "notes": [
+        "A rejected Claude sign-in is no longer erased: the tracker keeps it, retries every 15 minutes and recovers on its own when the server accepts it again.",
+        "The log now records why Claude rejected the sign-in (HTTP status and OAuth error code)."
+      ]
+    },
     {
       "version": "0.32.0",
       "notes": [

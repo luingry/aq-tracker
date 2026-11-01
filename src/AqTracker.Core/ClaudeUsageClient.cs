@@ -69,10 +69,12 @@ public sealed class ClaudeUsageClient : IDisposable
     private DateTimeOffset _lastSlowLoggedAt;
     /// <summary>A snapshot older than this is reported as stale even when no poll reported a failure.</summary>
     public static readonly TimeSpan MaxSnapshotAge = TimeSpan.FromMinutes(3);
+    /// <summary>How often credentials the server rejected are tried again; a transient rejection must not cost a new sign-in.</summary>
+    public static readonly TimeSpan RejectedRetryInterval = TimeSpan.FromMinutes(15);
     private int _failures, _unreadableLoads, _networkFailures, _failureCount;
-    private bool _credentialsUnreadable, _stale = true, _stuckReported, _skipIPv6 = true;
-    private DateTimeOffset _nextAttempt, _inFlightSince, _lastFailureLoggedAt, _persistedAt;
-    private string? _lastFailure;
+    private bool _credentialsUnreadable, _stale = true, _stuckReported, _skipIPv6 = true, _rejected;
+    private DateTimeOffset _nextAttempt, _inFlightSince, _lastFailureLoggedAt, _persistedAt, _lastRejectionLoggedAt;
+    private string? _lastFailure, _lastRejection;
     public ClaudeConnectionState State { get; private set; }
     public RateLimitSnapshot? Snapshot { get; private set; }
     // Age-based so a poll that silently stops succeeding can never keep old numbers looking current.
@@ -108,6 +110,7 @@ public sealed class ClaudeUsageClient : IDisposable
             _tokens = tokens;
             State = ClaudeConnectionState.Connected;
             _nextAttempt = default; _failures = 0; _unreadableLoads = 0; _credentialsUnreadable = false;
+            _rejected = false; _lastRejection = null;
         }
         finally { _gate.Release(); }
     }
@@ -119,7 +122,7 @@ public sealed class ClaudeUsageClient : IDisposable
         {
             _store.Delete();
             _tokens = null; Snapshot = null; _stale = true;
-            _unreadableLoads = 0; _credentialsUnreadable = false;
+            _unreadableLoads = 0; _credentialsUnreadable = false; _rejected = false; _lastRejection = null;
             State = ClaudeConnectionState.Disconnected;
             if (File.Exists(_snapshotPath)) File.Delete(_snapshotPath);
         }
@@ -140,8 +143,9 @@ public sealed class ClaudeUsageClient : IDisposable
         {
             if (_clock() + TickSlack < _nextAttempt) return;
             // A sharing/DPAPI failure during sign-in must not permanently disconnect
-            // a client whose credentials are still safely persisted on disk.
-            if (_tokens is null && (State == ClaudeConnectionState.Disconnected || _credentialsUnreadable))
+            // a client whose credentials are still safely persisted on disk. Rejected credentials are kept and
+            // retried too: the state stays Reconnect until the server accepts them again.
+            if (_tokens is null && (State != ClaudeConnectionState.Connected || _credentialsUnreadable))
             {
                 _tokens = _store.Load();
                 if (_tokens is null)
@@ -151,8 +155,11 @@ public sealed class ClaudeUsageClient : IDisposable
                     return;
                 }
                 _unreadableLoads = 0; _credentialsUnreadable = false;
-                State = ClaudeConnectionState.Connected;
-                SanitizedLogger.Write("Claude credentials recovered after initial load was unavailable.");
+                if (!_rejected)
+                {
+                    State = ClaudeConnectionState.Connected;
+                    SanitizedLogger.Write("Claude credentials recovered after initial load was unavailable.");
+                }
             }
             if (_tokens is null || Snapshot is not null && !IsStale &&
                 (onlyIfStale && _clock() - Snapshot.ReceivedAt <= PollInterval || idle && _clock() - Snapshot.ReceivedAt + TickSlack < IdleInterval)) return;
@@ -164,12 +171,13 @@ public sealed class ClaudeUsageClient : IDisposable
             }
             using var first = await ReadUsageAsync(token).ConfigureAwait(false);
             if (refreshed && first.StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.BadRequest)
-            { RequireReconnect(); return; }
+            { RequireReconnect("usage HTTP " + (int)first.StatusCode + " after token refresh"); return; }
             if (first.StatusCode == HttpStatusCode.Unauthorized)
             {
                 if (!await RefreshTokenAsync(token).ConfigureAwait(false)) return;
                 using var retry = await ReadUsageAsync(token).ConfigureAwait(false);
-                if (retry.StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.BadRequest) { RequireReconnect(); return; }
+                if (retry.StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.BadRequest)
+                { RequireReconnect("usage HTTP " + (int)retry.StatusCode + " after token refresh"); return; }
                 await ApplyUsageAsync(retry).ConfigureAwait(false);
             }
             else await ApplyUsageAsync(first).ConfigureAwait(false);
@@ -192,7 +200,7 @@ public sealed class ClaudeUsageClient : IDisposable
             // Persist rotation before publishing the new access token to concurrent callers.
             _store.Save(tokens); _tokens = tokens; return true;
         }
-        catch (ClaudeAuthenticationException) { RequireReconnect(); return false; }
+        catch (ClaudeAuthenticationException error) { RequireReconnect(error.Reason); return false; }
     }
 
     private async Task<ClaudeTokens> RequestTokensAsync(object payload, string? previousRefresh, CancellationToken cancellationToken)
@@ -201,15 +209,17 @@ public sealed class ClaudeUsageClient : IDisposable
         { Content = new StringContent(JsonSerializer.Serialize(payload), Encoding.UTF8, "application/json") };
         PrepareConnection(request);
         using var response = await _http.SendAsync(request, cancellationToken).ConfigureAwait(false);
-        if ((int)response.StatusCode == 429 || (int)response.StatusCode >= 500) throw new TransientClaudeException((int)response.StatusCode, RetryAfter(response));
-        if (!response.IsSuccessStatusCode) throw new ClaudeAuthenticationException();
+        // Only 400/401 answer for the credentials; anything else (429, 5xx, an edge 403...) is retried with backoff.
+        if (response.StatusCode is HttpStatusCode.BadRequest or HttpStatusCode.Unauthorized)
+            throw new ClaudeAuthenticationException("token endpoint HTTP " + (int)response.StatusCode + OAuthError(await response.Content.ReadAsStringAsync().ConfigureAwait(false)));
+        if (!response.IsSuccessStatusCode) throw new TransientClaudeException((int)response.StatusCode, RetryAfter(response));
         using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync().ConfigureAwait(false));
         var root = document.RootElement;
         if (root.ValueKind != JsonValueKind.Object || !root.TryGetProperty("access_token", out var access) || access.ValueKind != JsonValueKind.String ||
             string.IsNullOrWhiteSpace(access.GetString()) || !root.TryGetProperty("expires_in", out var expires) ||
-            expires.ValueKind != JsonValueKind.Number || !expires.TryGetInt32(out var seconds) || seconds <= 0) throw new ClaudeAuthenticationException();
+            expires.ValueKind != JsonValueKind.Number || !expires.TryGetInt32(out var seconds) || seconds <= 0) throw new ClaudeAuthenticationException("token response incomplete");
         var refresh = root.TryGetProperty("refresh_token", out var r) && r.ValueKind == JsonValueKind.String ? r.GetString() : previousRefresh;
-        if (string.IsNullOrWhiteSpace(refresh)) throw new ClaudeAuthenticationException();
+        if (string.IsNullOrWhiteSpace(refresh)) throw new ClaudeAuthenticationException("token response without refresh token");
         return new(access.GetString()!, refresh!, _clock().AddSeconds(seconds));
     }
 
@@ -258,6 +268,7 @@ public sealed class ClaudeUsageClient : IDisposable
             _persistedAt = snapshot.ReceivedAt;
         }
         Snapshot = snapshot; _stale = false; State = ClaudeConnectionState.Connected;
+        if (_rejected) { _rejected = false; _lastRejection = null; SanitizedLogger.Write("Claude credentials accepted again after a rejection."); }
         _failures = 0; _networkFailures = 0;
         if (++_successStreak >= SuccessesBeforeSpeedUp && _pace > PollInterval)
         {
@@ -316,6 +327,18 @@ public sealed class ClaudeUsageClient : IDisposable
         var delay = header?.Delta ?? (header?.Date is { } date ? date - _clock() : null);
         return delay is { } value && value > TimeSpan.Zero ? (value > MaxRetryAfter ? MaxRetryAfter : value) : null;
     }
+    /// <summary>The OAuth error code (e.g. invalid_grant) of a rejection; unlike the rest of the body it carries no secret.</summary>
+    private static string OAuthError(string body)
+    {
+        try
+        {
+            using var document = JsonDocument.Parse(body);
+            return document.RootElement.ValueKind == JsonValueKind.Object && document.RootElement.TryGetProperty("error", out var error) &&
+                error.ValueKind == JsonValueKind.String && error.GetString() is { Length: > 0 and <= 40 } code && code.All(c => c is >= 'a' and <= 'z' or '_')
+                ? " " + code : "";
+        }
+        catch (JsonException) { return " (non-JSON body)"; }
+    }
     private static string Describe(HttpRequestException error) =>
         error.InnerException is WebException web ? "WebException " + web.Status : error.InnerException?.GetType().Name ?? nameof(HttpRequestException);
     /// <summary>
@@ -338,11 +361,29 @@ public sealed class ClaudeUsageClient : IDisposable
         var delay = TimeSpan.FromTicks(Math.Min(MaxBackoff.Ticks, PollInterval.Ticks << (_failures - 1)));
         _nextAttempt = _clock() + (retryAfter > delay ? retryAfter.Value : delay);
     }
-    private void RequireReconnect()
+    /// <summary>
+    /// The credentials stay on disk: deleting them here turned one rejection into a permanent sign-out. They are retried
+    /// every <see cref="RejectedRetryInterval"/>, and a refresh token rotated on disk by the other mode (standalone and
+    /// hosted share the file) is adopted instead of reporting a reconnect.
+    /// </summary>
+    private void RequireReconnect(string reason)
     {
-        SanitizedLogger.Write("Claude reconnect required: authentication rejected.");
-        _tokens = null; _stale = true; State = ClaudeConnectionState.Reconnect;
-        _store.Delete();
+        var rejectedRefresh = _tokens?.RefreshToken;
+        _tokens = null; _stale = true; _successStreak = 0;
+        var stored = _store.Load();
+        if (stored is not null && stored.RefreshToken != rejectedRefresh)
+        {
+            _tokens = stored; _nextAttempt = default;
+            SanitizedLogger.Write("Claude credentials were rejected (" + reason + ") but changed on disk; retrying with the stored ones.");
+            return;
+        }
+        _rejected = true; State = ClaudeConnectionState.Reconnect;
+        var now = _clock();
+        _nextAttempt = now + RejectedRetryInterval;
+        if (reason == _lastRejection && now - _lastRejectionLoggedAt < TimeSpan.FromHours(1)) return;
+        _lastRejection = reason; _lastRejectionLoggedAt = now;
+        SanitizedLogger.Write("Claude reconnect required: authentication rejected (" + reason + "); credentials kept, next retry " +
+            _nextAttempt.ToLocalTime().ToString("HH:mm:ss", CultureInfo.InvariantCulture) + ".");
     }
     public void Dispose() { _http.Dispose(); }
     private sealed class TransientClaudeException(int status, TimeSpan? retryAfter) : Exception
@@ -350,5 +391,8 @@ public sealed class ClaudeUsageClient : IDisposable
         public int Status { get; } = status;
         public TimeSpan? RetryAfter { get; } = retryAfter;
     }
-    private sealed class ClaudeAuthenticationException : Exception { }
+    private sealed class ClaudeAuthenticationException(string reason) : Exception
+    {
+        public string Reason { get; } = reason;
+    }
 }
