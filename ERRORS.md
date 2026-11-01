@@ -1,5 +1,12 @@
 # Erros e solucoes conhecidas
 
+## Cota do Claude parada: login apagado apos uma rejeicao do refresh token (0.32.1)
+
+- **Sintoma (2026-11-01):** cota do Claude sem atualizar desde a noite anterior; ao reabrir o modulo, `Claude startup state: Disconnected`. Ultima linha relevante do log: `2026-10-31T23:46:16 Claude reconnect required: authentication rejected.` e `%APPDATA%\AqTracker\claude-tokens.dat` havia sumido.
+- **Causa raiz:** `ClaudeUsageClient.RequireReconnect` chamava `_store.Delete()` em qualquer rejeicao: qualquer status nao-2xx que nao fosse 429/5xx no endpoint de token (inclusive `403` de borda), resposta de token incompleta, ou `400/401` do usage logo apos um refresh bem-sucedido (apagando ate o token recem-rotacionado). Uma rejeicao passageira virava logout permanente. O log nao trazia status nem codigo OAuth, entao o motivo exato do dia 31 nao e recuperavel.
+- **Solucao:** credenciais nunca sao apagadas na rejeicao (so em Desconectar ou sobrescritas num novo login). Estado vai a `Reconnect`, o arquivo e relido (se o refresh token no disco mudou, outro modo rotacionou: adota e segue) e tenta de novo a cada 15 min (`RejectedRetryInterval`); sucesso volta a `Connected` e loga `accepted again`. So `400/401` do endpoint de token sao rejeicao; outros codigos fazem backoff. O log inclui `token endpoint HTTP <status> <oauth error>` (codigo validado `[a-z_]`, nunca o corpo).
+- **Prevencao:** nunca destruir credenciais OAuth automaticamente por causa de uma resposta de rede; marcar o estado e manter o arquivo. Toda rejeicao de autenticacao precisa logar status e codigo de erro.
+
 ## Copia do login do Claude no modo hospedado invalidava a outra copia (0.31.0)
 
 - **Sintoma (2026-10-19):** ao testar o modulo do SwissTechKnife com uma pasta de dados vazia, a migracao copiou `claude-tokens.dat` de `%APPDATA%\AqTracker`; o processo hospedado renovou o token (arquivo regravado, hash do refresh token diferente) e a copia do standalone ficou com um refresh token possivelmente revogado.

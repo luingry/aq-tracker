@@ -1832,7 +1832,55 @@ try
         using var rejectedClient = new ClaudeUsageClient(rejectedStore, Path.Combine(claudeFixtureRoot, "rejected.json"), "0.22.0",
             new TestHttpHandler((_, _) => Task.FromResult(JsonResponse(failureStatus, """{"error":"invalid_grant"}"""))), () => claudeTestNow);
         await rejectedClient.RefreshAsync(CancellationToken.None);
-        Assert(rejectedClient.State == ClaudeConnectionState.Reconnect && rejectedStore.Load() is null && rejectedClient.IsStale, "invalid_grant/400/401 refresh requires reconnect and removes invalid credentials");
+        Assert(rejectedClient.State == ClaudeConnectionState.Reconnect && rejectedStore.Load()?.RefreshToken == "revoked" && rejectedClient.IsStale &&
+            rejectedClient.NextAttemptAt == claudeTestNow + ClaudeUsageClient.RejectedRetryInterval, "invalid_grant/400/401 refresh requires reconnect but keeps the credentials for a later retry");
+    }
+    {
+        // A rejection that was not final (here: the server accepts the same refresh token later) heals without a new sign-in.
+        var transientNow = claudeTestNow;
+        var acceptRefresh = false;
+        var transientStore = new TestClaudeTokenStore(new("old", "kept", claudeTestNow.AddMinutes(1)));
+        var transientTransport = new TestHttpHandler((request, _) => Task.FromResult(request.Method == HttpMethod.Post
+            ? acceptRefresh ? JsonResponse(HttpStatusCode.OK, """{"access_token":"fresh","refresh_token":"rotated","expires_in":3600}""") : JsonResponse(HttpStatusCode.BadRequest, """{"error":"invalid_grant"}""")
+            : JsonResponse(HttpStatusCode.OK, "{}")));
+        using var transientClient = new ClaudeUsageClient(transientStore, Path.Combine(claudeFixtureRoot, "transient-rejection.json"), "test", transientTransport, () => transientNow);
+        await transientClient.RefreshAsync(CancellationToken.None);
+        var callsAfterRejection = transientTransport.Calls;
+        transientNow += ClaudeUsageClient.RejectedRetryInterval - TimeSpan.FromMinutes(1);
+        await transientClient.RefreshAsync(CancellationToken.None);
+        Assert(transientClient.State == ClaudeConnectionState.Reconnect && transientTransport.Calls == callsAfterRejection, "rejected credentials are not hammered before the retry interval");
+        acceptRefresh = true;
+        transientNow = transientClient.NextAttemptAt;
+        await transientClient.RefreshAsync(CancellationToken.None);
+        Assert(transientClient.State == ClaudeConnectionState.Connected && !transientClient.IsStale && transientStore.Load()?.RefreshToken == "rotated", "kept credentials recover to Connected once the server accepts them again");
+    }
+    {
+        // The other mode (standalone/hosted share the token file) rotated the refresh token: adopt it instead of asking for a reconnect.
+        var sharedStore = new TestClaudeTokenStore(new("old", "stale-refresh", claudeTestNow.AddMinutes(1)));
+        var sharedTransport = new TestHttpHandler(async (request, _) =>
+        {
+            if (request.Method != HttpMethod.Post) return JsonResponse(HttpStatusCode.OK, "{}");
+            using var body = JsonDocument.Parse(await request.Content!.ReadAsStringAsync());
+            if (body.RootElement.GetProperty("refresh_token").GetString() == "stale-refresh")
+            {
+                sharedStore.Save(new("other-access", "other-refresh", claudeTestNow.AddMinutes(1)));
+                return JsonResponse(HttpStatusCode.BadRequest, """{"error":"invalid_grant"}""");
+            }
+            return JsonResponse(HttpStatusCode.OK, """{"access_token":"fresh","refresh_token":"next","expires_in":3600}""");
+        });
+        using var sharedClient = new ClaudeUsageClient(sharedStore, Path.Combine(claudeFixtureRoot, "shared-rotation.json"), "test", sharedTransport, () => claudeTestNow);
+        await sharedClient.RefreshAsync(CancellationToken.None);
+        Assert(sharedClient.State == ClaudeConnectionState.Connected, "a refresh token rotated on disk by the other mode is not reported as a reconnect");
+        await sharedClient.RefreshAsync(CancellationToken.None);
+        Assert(sharedClient.State == ClaudeConnectionState.Connected && !sharedClient.IsStale && sharedStore.Load()?.RefreshToken == "next", "the client continues with the refresh token rotated on disk");
+    }
+    {
+        // An edge/proxy refusal (403, not an OAuth answer) backs off without requiring a reconnect.
+        var edgeStore = new TestClaudeTokenStore(new("old", "kept", claudeTestNow.AddMinutes(1)));
+        using var edgeClient = new ClaudeUsageClient(edgeStore, Path.Combine(claudeFixtureRoot, "edge-403.json"), "test",
+            new TestHttpHandler((_, _) => Task.FromResult(JsonResponse(HttpStatusCode.Forbidden, "<html>blocked</html>"))), () => claudeTestNow);
+        await edgeClient.RefreshAsync(CancellationToken.None);
+        Assert(edgeClient.State == ClaudeConnectionState.Connected && edgeStore.Load()?.RefreshToken == "kept" && edgeClient.NextAttemptAt == claudeTestNow + ClaudeUsageClient.PollInterval, "token endpoint 403 is a transient failure with backoff");
     }
     var retryRejectedStore = new TestClaudeTokenStore(originalTokens);
     var temporarilyLockedTokens = Path.Combine(claudeFixtureRoot, "locked-startup.dat");
@@ -1856,13 +1904,13 @@ try
             : JsonResponse(rejectedUsageStatus, "{}")));
         using var preemptiveClient = new ClaudeUsageClient(preemptiveStore, Path.Combine(claudeFixtureRoot, "preemptive.json"), "0.22.0", preemptiveTransport, () => claudeTestNow);
         await preemptiveClient.RefreshAsync(CancellationToken.None);
-        Assert(preemptiveClient.State == ClaudeConnectionState.Reconnect && preemptiveStore.Load() is null && preemptiveTransport.Calls == 2, "400/401 after preemptive refresh requires reconnect without a second refresh loop");
+        Assert(preemptiveClient.State == ClaudeConnectionState.Reconnect && preemptiveStore.Load()?.RefreshToken == "rotated" && preemptiveTransport.Calls == 2, "400/401 after preemptive refresh requires reconnect without a second refresh loop, keeping the rotated token");
     }
     using (var retryRejected = new ClaudeUsageClient(retryRejectedStore, usagePath, "0.22.0", new TestHttpHandler((request, _) => Task.FromResult(
         request.Method == HttpMethod.Post ? JsonResponse(HttpStatusCode.OK, """{"access_token":"new","refresh_token":"rotated","expires_in":3600}""") : JsonResponse(HttpStatusCode.Unauthorized, "{}"))), () => claudeTestNow))
     {
         await retryRejected.RefreshAsync(CancellationToken.None);
-        Assert(retryRejected.State == ClaudeConnectionState.Reconnect && retryRejectedStore.Load() is null, "401 after successful token refresh disconnects without looping");
+        Assert(retryRejected.State == ClaudeConnectionState.Reconnect && retryRejectedStore.Load()?.RefreshToken == "rotated", "401 after successful token refresh requires reconnect without looping, keeping the rotated token");
     }
     var backoffNow = claudeTestNow;
     var backoffHandler = new TestHttpHandler((_, _) => Task.FromResult(JsonResponse(HttpStatusCode.ServiceUnavailable, "{}")));
