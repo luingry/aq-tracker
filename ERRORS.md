@@ -1,5 +1,14 @@
 # Erros e solucoes conhecidas
 
+## Cliques injetados lentos no sistema inteiro: janela layered animando (0.32.2)
+
+- **Sintoma (2026-11-23):** autoclickers (Clicket, AutoHotkey) presos em ~75 cliques/s com o AqTracker aberto; sem ele, 500. `SendInput` de um botao esquerdo down+up custava p50 ~11 ms (um frame) para qualquer processo; moves e button-up nao. AqTracker recem-aberto comecava em 0,5 ms e voltava a ~11 ms em segundos. Nenhum processo gastava CPU no atraso.
+- **Diagnostico:** probe autorizado (`C:\clkprobe2`, lancado fora da sandbox via WMI) clicando na propria janela. Suspender o processo do AqTracker -> 0,58 ms; esconder so a janela do widget -> 0,5 ms (tirar topmost, tirar `WS_EX_LAYERED` externamente, fade, monitor, stylus/touch do WPF: sem efeito). Suspender thread a thread: so a thread de UI e a thread de render do WPF zeravam o atraso, ou seja, o problema era o widget renderizando. Chaves temporarias no codigo: desligar spinner (`RepeatBehavior=Forever`) + brilho do gauge (`CompositionTarget.Rendering`) -> 0,24 ms; qualquer um sozinho ja bastava para o atraso (aparecem com agente trabalhando, por isso "volta em segundos"). Limitar o frame rate so reduz a fracao de cliques atrasados (20 fps ainda ~10%). Janela opaca (`AllowsTransparency=False`) com as animacoes a 60+ fps -> 0,24 ms.
+- **Causa raiz:** com `AllowsTransparency=True` o WPF cria uma janela layered e reapresenta cada frame via `UpdateLayeredWindow`. Enquanto uma janela layered e atualizada continuamente, todo button-down injetado na sessao espera ~1 frame dentro do `SendInput`.
+- **Solucao:** `MainWindow` e o `AgentListPopup` com `AllowsTransparency=False`; `DwmTransparency.Apply` define o fundo do `HwndSource` como transparente e estende o frame DWM para todo o cliente (`DwmExtendFrameIntoClientArea(-1)`), mantendo transparencia por pixel. `Window.Opacity` so funciona em janela layered, entao o fade vai para `WindowSurface.Opacity`. Guarda em `StateChanged` impede que "Mostrar area de trabalho" minimize o widget. Medido por varios minutos com agentes animando: p50 ~0,24 ms.
+- **Efeito colateral aceito:** pixels transparentes deixaram de ser click-through (cantos do widget e a margem de 15 px de sombra da lista de agentes recebem o clique).
+- **Prevencao:** nao use `AllowsTransparency=True` (nem `Popup AllowsTransparency`) em superficie que anima continuamente; o teste de UI exige que widget e popup nao sejam `WS_EX_LAYERED`. `ChatDetailsWindow` ainda e layered, mas nao anima.
+
 ## Cota do Claude parada: login apagado apos uma rejeicao do refresh token (0.32.1)
 
 - **Sintoma (2026-11-01):** cota do Claude sem atualizar desde a noite anterior; ao reabrir o modulo, `Claude startup state: Disconnected`. Ultima linha relevante do log: `2026-10-31T23:46:16 Claude reconnect required: authentication rejected.` e `%APPDATA%\AqTracker\claude-tokens.dat` havia sumido.

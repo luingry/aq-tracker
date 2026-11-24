@@ -5,7 +5,7 @@
         Title="{DynamicResource Loc.AppTitle}"
         Width="62" Height="52" MinWidth="62" MinHeight="52"
         WindowStyle="None" ResizeMode="NoResize" ShowInTaskbar="False" ShowActivated="False"
-        AllowsTransparency="True" Background="Transparent"
+        AllowsTransparency="False" Background="Transparent"
         FontFamily="./assets/fonts/#Atkinson Hyperlegible Next">
   <Border x:Name="WindowSurface" CornerRadius="12" ClipToBounds="True" SnapsToDevicePixels="True">
     <Border.Style>
@@ -109,7 +109,7 @@
             </Button.Template>
           </Button>
           <Popup x:Name="AgentListPopup" Placement="Bottom" PlacementTarget="{Binding ElementName=AgentIndicatorButton}"
-                 AllowsTransparency="True" StaysOpen="True" PopupAnimation="None" IsOpen="{Binding IsAgentListOpen}" HorizontalOffset="-149" VerticalOffset="-10" Opened="AgentListPopupOpened">
+                 AllowsTransparency="False" StaysOpen="True" PopupAnimation="None" IsOpen="{Binding IsAgentListOpen}" HorizontalOffset="-149" VerticalOffset="-10" Opened="AgentListPopupOpened">
             <Border x:Name="AgentListFadeSurface" Padding="15" Background="Transparent">
               <Border x:Name="AgentListWrapper" Width="288" MaxHeight="350" Background="Transparent" BorderThickness="0" RenderTransformOrigin="0.5,0">
                 <Border.RenderTransform><TransformGroup><ScaleTransform x:Name="AgentListWrapperScale" /><TranslateTransform x:Name="AgentListWrapperTranslate" /></TransformGroup></Border.RenderTransform>

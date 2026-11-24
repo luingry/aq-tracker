@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.32.2] - 2026-11-23
+
+### Corrigido
+
+- Cliques injetados (autoclickers, macros, AutoHotkey) não ficam mais lentos no sistema inteiro enquanto o widget mostra agentes trabalhando. Com o spinner ou o brilho do gauge animando, cada botão esquerdo pressionado via `SendInput` esperava ~11 ms (um frame), limitando autoclickers a ~75 cliques/s; agora fica abaixo de 1 ms. O widget e a lista de agentes deixaram de ser janelas *layered* do WPF (`AllowsTransparency`) e passaram a ter transparência por pixel via DWM, com o mesmo visual.
+- A opacidade do widget flutuante ("esmaecer") passa a ser aplicada ao conteúdo, já que a janela não é mais layered.
+- Áreas transparentes do widget e a margem de sombra da lista de agentes agora recebem os cliques do mouse (antes passavam para a janela de trás).
+
 ## [0.32.1] - 2026-11-01
 
 ### Corrigido
