@@ -157,6 +157,8 @@ public partial class MainWindow : Window
             StartRuntime();
         };
         Closing += OnClosing;
+        // The widget has no minimized form; as a normal (non-layered) window, Show Desktop could minimize it to a stub.
+        StateChanged += (_, _) => { if (WindowState == WindowState.Minimized) WindowState = WindowState.Normal; };
         SourceInitialized += OnSourceInitialized;
         LocationChanged += (_, _) => RepositionAgentListPopup();
         SizeChanged += (_, _) =>
@@ -789,6 +791,8 @@ public partial class MainWindow : Window
 
     private void AgentListPopupOpened(object sender, EventArgs e)
     {
+        // The popup is not layered either (same SendInput stall as the window), so DWM keeps its shadow margin transparent.
+        DwmTransparency.Apply(PresentationSource.FromVisual(AgentListPopup.Child) as HwndSource);
         UpdateFloatingOpacity();
         RepositionAgentListPopup();
         if (!SystemParameters.ClientAreaAnimation) return;
@@ -980,7 +984,9 @@ public partial class MainWindow : Window
     private void OnSourceInitialized(object? sender, EventArgs e)
     {
         var handle = new WindowInteropHelper(this).Handle;
-        HwndSource.FromHwnd(handle)?.AddHook(WindowProc);
+        var source = HwndSource.FromHwnd(handle);
+        source?.AddHook(WindowProc);
+        DwmTransparency.Apply(source);
         RestoreWindowPosition(handle);
         ApplyTrayOnlyWindowStyle();
         ApplyBackdrop(_settings.Theme);

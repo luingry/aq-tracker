@@ -2348,13 +2348,14 @@ var claudeUiThread = new Thread(() =>
         var flags = System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic;
         void InvokeWindow(string method, params object[] arguments) => typeof(AqTracker.MainWindow).GetMethod(method, flags)!.Invoke(window, arguments);
         InvokeWindow("ShowFromTray");
+        var widgetSurface = (System.Windows.Controls.Border)window.FindName("WindowSurface");
         vm.Expanded = false;
         hoverSurface.SetValue(mouseOverKey, false);
         RefreshModeSize();
-        Assert(window.IsVisible && window.Opacity == .3, "tray restores compact floating widget at selected opacity");
+        Assert(window.IsVisible && widgetSurface.Opacity == .3, "tray restores compact floating widget at selected opacity");
         hoverSurface.SetValue(mouseOverKey, true);
         InvokeWindow("UpdateFloatingOpacity");
-        Assert(window.Opacity == 1, "hover restores full floating opacity");
+        Assert(widgetSurface.Opacity == 1, "hover restores full floating opacity");
         hoverSurface.SetValue(mouseOverKey, false);
         var fadeSurface = (System.Windows.Controls.Border)window.FindName("AgentListFadeSurface");
         var agentPopup = (System.Windows.Controls.Primitives.Popup)window.FindName("AgentListPopup");
@@ -2382,6 +2383,9 @@ var claudeUiThread = new Thread(() =>
         var nativeStyleMethod = typeof(AqTracker.MainWindow).GetMethod("GetExtendedWindowStyle", System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.NonPublic)!;
         var popupStyle = ((IntPtr)nativeStyleMethod.Invoke(null, [popupHandle])!).ToInt64();
         Assert((popupStyle & 8) == 0, "agent popup obeys disabled always-on-top rather than remaining above other applications");
+        const long layeredStyle = 0x80000;
+        Assert((popupStyle & layeredStyle) == 0 && (((IntPtr)nativeStyleMethod.Invoke(null, [new System.Windows.Interop.WindowInteropHelper(window).Handle])!).ToInt64() & layeredStyle) == 0,
+            "widget and agent popup are not layered windows (an animating layered window stalls injected clicks system-wide)");
         bool NativeTopmost(IntPtr handle) => (((IntPtr)nativeStyleMethod.Invoke(null, [handle])!).ToInt64() & 8) != 0;
         var mainHandle = new System.Windows.Interop.WindowInteropHelper(window).Handle;
         Assert(!NativeTopmost(mainHandle), "main window also leaves the topmost band");
@@ -2413,17 +2417,17 @@ var claudeUiThread = new Thread(() =>
 
         fadeSurface.SetValue(mouseOverKey, false);
         InvokeWindow("UpdateFloatingOpacity");
-        Assert(window.Opacity == .3 && fadeSurface.Opacity == .3, "agent popup and compact widget share selected opacity outside hover");
+        Assert(widgetSurface.Opacity == .3 && fadeSurface.Opacity == .3, "agent popup and compact widget share selected opacity outside hover");
         fadeSurface.SetValue(mouseOverKey, true);
         InvokeWindow("UpdateFloatingOpacity");
-        Assert(window.Opacity == 1 && fadeSurface.Opacity == 1, "hovering agent list restores both surfaces to full opacity");
+        Assert(widgetSurface.Opacity == 1 && fadeSurface.Opacity == 1, "hovering agent list restores both surfaces to full opacity");
         fadeSurface.SetValue(mouseOverKey, false);
         InvokeWindow("UpdateFloatingOpacity");
-        Assert(window.Opacity == .3 && fadeSurface.Opacity == .3, "leaving the list fades both surfaces again");
+        Assert(widgetSurface.Opacity == .3 && fadeSurface.Opacity == .3, "leaving the list fades both surfaces again");
         agentPopup.IsOpen = false;
         vm.Expanded = true;
         RefreshModeSize();
-        Assert(window.Opacity == 1, "detailed mode stays opaque without hover");
+        Assert(widgetSurface.Opacity == 1, "detailed mode stays opaque without hover");
         var trayEntries = (System.Collections.IList)typeof(AqTracker.MainWindow).GetField("_quotaTray", flags)!.GetValue(window)!;
         Assert(trayEntries.Count == vm.NotificationQuotas.Count, "tray mirrors all selected quota rows while floating window is visible");
         vm.SetCompactQuotaDisplay("both");

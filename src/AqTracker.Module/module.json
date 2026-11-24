@@ -1,6 +1,6 @@
 {
   "id": "aq-tracker",
-  "version": "0.32.1",
+  "version": "0.32.2",
   "entryAssembly": "AqTracker.Module.dll",
   "entryType": "AqTracker.Module.AqTrackerModule",
   "sdkVersion": 1,
@@ -8,6 +8,13 @@
   "loadMode": "memory",
   "window": true,
   "releaseNotes": [
+    {
+      "version": "0.32.2",
+      "notes": [
+        "Injected clicks (autoclickers, macros, AutoHotkey) are no longer slowed down system-wide while the widget animates working agents: each left-button press used to wait about 11 ms, capping autoclickers near 75 clicks per second.",
+        "The widget and the agent list keep their transparent look through DWM instead of layered windows; their transparent edges now take mouse clicks."
+      ]
+    },
     {
       "version": "0.32.1",
       "notes": [

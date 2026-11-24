@@ -43,9 +43,11 @@ public partial class MainWindow
         if (!IsLoaded && _startupHidden) return;
         var isHovered = (bool)WindowSurface.GetValue(IsMouseOverProperty) ||
             AgentListPopup.IsOpen && (bool)AgentListFadeSurface.GetValue(IsMouseOverProperty);
-        Opacity = _settings.FadeFloatingWidget && !_viewModel.Expanded &&
+        // Window.Opacity only works on layered windows; the widget is DWM-transparent instead, so fade its content.
+        var opacity = _settings.FadeFloatingWidget && !_viewModel.Expanded &&
             SettingsPanel.Visibility != Visibility.Visible && !isHovered ? Math.Max(10, Math.Min(90, _settings.FloatingOpacityPercent)) / 100d : 1;
-        AgentListFadeSurface.Opacity = Opacity;
+        WindowSurface.Opacity = opacity;
+        AgentListFadeSurface.Opacity = opacity;
     }
 
     private void UpdateQuotaTray()
